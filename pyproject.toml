@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools >= 77.0.3","setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sika"
+description = "Flexible pipeline and sampling framework"
+authors = [
+    {name="Sage Santomenna", email = "mstp2022@mymail.pomona.edu"},
+]
+dynamic = ["version"]
+readme = "README.md"
+requires-python = ">=3.9"
+license-files = ["LICENSE"]
+license="BSD-3-Clause"
+dependencies = [
+    'numpy',
+    'psutil',
+    'matplotlib',
+    'pytz',
+    'scipy',
+    'colorlog',
+    'tomlkit',
+    'xarray',
+    'pandas',
+    'tqdm',
+    'schwimmbad',
+    'dynesty',
+    'pymultinest',
+    'corner',
+    'networkx'
+]
+
+[project.optional-dependencies]
+docs = [
+    "nbsphinx",
+    "sphinx",
+    "sphinx-astropy",
+    "sphinx-automodapi",
+    "sphinx-issues",
+    "sphinx-book-theme"
+]
+spectroscopy = [
+    "astropy",
+    "petitRADTRANS"
+]
+test = [
+    "pytest"
+]
+mpi = [
+    "mpi4py"
+]
+
+[tool.setuptools.package-data]
+sika = ["config/config.toml","config/logging.json","pytest.ini"]
+
+[project.urls]
+github_project = "https://github.com/sagesanto/sika"
+
+[tool.setuptools_scm]
