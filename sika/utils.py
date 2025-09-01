@@ -315,21 +315,30 @@ def archive_config(config: Config):
         config.write(outpath)
     return outpath
 
-# WARNING: DOES NOT WORK WITH 1D DATASETS FOR NOW :(
 def groupby(group_by: List[str], ds:xr.Dataset, flatten=False):
-    """ Group and xarray dataset by the values of given data variables."""
     dims = list(ds.coords)
     variables = list(ds.data_vars)
     other_params = [p for p in variables if p not in group_by]
-    
+
     # print(f"Grouping dataset by {group_by} with other parameters {other_params}")
     # print(f"Dims: {dims}, Vars: {variables}")
-        
+
+    if not dims:
+        subgroup = {p: ds[p].values for p in group_by}
+        vals = {o: ds[o].values for o in other_params}
+        if flatten:
+            coords = [{}]
+            yield subgroup, coords, [vals]
+            return
+        else:
+            remaining = ds[other_params]
+            yield subgroup, remaining
+            return
 
     flat = ds.stack(flat_index=dims)
     df = flat.to_dataframe()
     grouped = df.groupby(group_by)
-    
+
     for group_vals, group_df in grouped:
         if not isinstance(group_vals, tuple):
             group_vals = (group_vals,)
@@ -345,11 +354,15 @@ def groupby(group_by: List[str], ds:xr.Dataset, flatten=False):
             if dims:
                 index_vals = group_df.index
                 subset = flat.sel({"flat_index": index_vals})[other_params]
-                unstacked = subset.unstack("flat_index")
-                yield sg, unstacked
+                if "flat_index" not in subset.dims:  # the remaining dataset is flat
+                    yield sg, subset
+                else:
+                    unstacked = subset.unstack("flat_index")
+                    yield sg, unstacked
             else:
                 subset = ds.sel({var: val for var, val in zip(group_by, group_vals)})
                 yield sg, subset[other_params]
+
 
 
 # this wants to be with the hypothetical NDimData class
