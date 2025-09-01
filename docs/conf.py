@@ -36,8 +36,12 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 autodoc_default_options = {
     'members': True,
     'member-order': 'bysource',
-    'special-members': '__init__, __call__, _call'
+    'special-members': '__init__, __call__, _call',
+    'show-inheritance': True,
+    'inherited-members': True,
 }
+
+add_module_names = False
 
 autodoc_typehints = "both"
 # -- Options for HTML output -------------------------------------------------
@@ -52,30 +56,3 @@ html_theme_options = {
     "repository_url": "https://github.com/sagesanto/sika",
     "use_repository_button": True,
 }
-
-
-
-
-def resolve_type_aliases(app, env, node, contnode):
-    """Resolve :class: references to our type aliases as :attr: instead."""
-
-    # A sphinx bug means that TypeVar doesn't work:
-    # https://github.com/sphinx-doc/sphinx/issues/10785
-
-    if (
-        node["refdomain"] == "py"
-        and node["reftype"] == "class"
-        and "sika_typing" in node["reftarget"]
-    ):
-        print(node.__dict__)
-        print("meets criteria!")
-        resolved = app.env.get_domain("py").resolve_xref(
-            env, node["refdoc"], app.builder, "attr", node["reftarget"], node, contnode
-        )
-        print(resolved)
-        print()
-        return resolved
-
-
-def setup(app):
-    app.connect("missing-reference", resolve_type_aliases)

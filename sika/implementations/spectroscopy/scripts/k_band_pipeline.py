@@ -9,7 +9,6 @@ import numpy as np
 from sika.implementations.general.product_iterators import ListIterator
 from sika.implementations.spectroscopy import (
     Spectrum,
-    CRIRESSpectrum,
     PassbandRestrictor,
     PercentileScaler,
     CommonLogPressureGrid,
@@ -22,6 +21,7 @@ from sika.implementations.spectroscopy import (
     SpectralGridInterpolator,
 )
 from sika.implementations.general import FileCache, ParamRestrictor, ParamInjector
+from sika.implementations.spectroscopy.crires.crires_spectrum import CRIRESSpectrum
 from sika.implementations.spectroscopy.utils import plot_spectra, pressure_grid_tiers
 from sika.modeling import (
     Parameter,

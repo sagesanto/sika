@@ -5,7 +5,9 @@ import time
 import logging
 
 from sika.provider import ContinuousProvider, IntermediateTask, Provider
-from .spectra import Spectrum
+from .spectrum import Spectrum
+
+__all__ = ["SpectralGridInterpolator"]
 
 class SpectralGridInterpolator(ContinuousProvider[Spectrum], IntermediateTask[Provider[Spectrum]]):
     """ Interpolates between spectral models on a grid of parameters. """

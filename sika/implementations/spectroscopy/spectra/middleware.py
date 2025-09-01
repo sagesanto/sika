@@ -5,9 +5,11 @@ import matplotlib.pyplot as plt
 
 from sika.provider import Provider, ProviderMiddleware
 from sika.implementations.general.metadata import MetadataMerger
-from .spectra import Spectrum
-from .flux import Flux
+from .spectrum import Spectrum
+from ..flux import Flux
 from sika.config import Config
+
+__all__ = ["PercentileScaler", "PassbandRestrictor", "SpectrumVisualization", "KBandCoupler"]
 
 class PercentileScaler(ProviderMiddleware[Spectrum]):
     """ Scale the flux of the previous spectral model to a specified percentile of its flux. """
@@ -19,6 +21,8 @@ class PercentileScaler(ProviderMiddleware[Spectrum]):
     def product_middleware(self, model: Spectrum) -> Spectrum:
         scale_factor = np.nanpercentile(model.flux, self.percentile)
         if scale_factor == 0 or np.isnan(scale_factor) or np.isinf(scale_factor):
+            self.write_out("flux:",model.flux)
+            self.write_out(model)
             raise ValueError(f"Scale factor for percentile {self.percentile} is {scale_factor}, cannot scale flux.")
         model.flux /= scale_factor
         model.errors /= scale_factor

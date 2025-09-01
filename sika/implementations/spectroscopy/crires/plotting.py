@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .spectra import (
-    Spectrum,
-    CRIRESSpectrum
+from sika.implementations.spectroscopy.crires.crires_spectrum import CRIRESSpectrum
+from sika.implementations.spectroscopy.spectra.spectrum import (
+    Spectrum
 )
 
 def plot_crires_model(
@@ -16,10 +16,10 @@ def plot_crires_model(
 ):
     import matplotlib.ticker as pltticker
 
-    order_wlen = data.wlen_by_order[spectral_order]
+    order_wlen = data.wlen[spectral_order]
     wlen_range = [min(order_wlen), max(order_wlen)]
 
-    data_flux = data.flux_by_order[spectral_order]
+    data_flux = data.flux[spectral_order]
 
     mask = np.isin(model.wlen, order_wlen)
 

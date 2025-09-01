@@ -8,9 +8,10 @@ import scipy.ndimage as ndi
 
 import matplotlib.pyplot as plt
 
+from .crires.crires_spectrum import CRIRESSpectrum
 from sika.implementations.spectroscopy.utils import optimize_scale_factors
 
-from .spectra import Spectrum, CRIRESSpectrum
+from .spectra.spectrum import Spectrum
 from sika.modeling import Sampler, Dataset, ConstraintError
 
 # this is required or pickling of things like lambdas will not work
@@ -19,6 +20,8 @@ import dynesty.utils
 dynesty.utils.pickle_module = dill
 
 from sika.utils import savefig
+
+__all__ = ["NComponentSampler", "scale_model_to_order"]
 
 def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_flux:np.ndarray, filter_type, filter_size) -> np.ndarray:
     # take a model representing the entire spectrum and crop/scale it to a specific order in the data
@@ -37,7 +40,11 @@ def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_f
     f[bad] = np.nan
     return f
 
-class NComponentModel(Sampler[CRIRESSpectrum, Spectrum]):
+class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
+    """A :py:class:`~sika.modeling.sampler.Sampler` that fits N spectra to a spectroscopic dataset.
+
+    :type Sampler: :py:class:`~sika.modeling.sampler.Sampler`
+    """
     
     def _make_model(self) -> Dataset[CRIRESSpectrum]:
         # get individual spectra for each model component
@@ -49,7 +56,8 @@ class NComponentModel(Sampler[CRIRESSpectrum, Spectrum]):
             modeled_spectra = [md.values(selector) for md in modeled_datasets]
             wlen, comb_flux, comb_errors, comb_residuals, comb_scale_factors, betas = [], [], [], [], [], []
             orderwise_model_fluxes = []
-            for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen_by_order, data_spectrum.flux_by_order, data_spectrum.error_by_order):
+            for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen, data_spectrum.flux, data_spectrum.errors):
+            # for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen_by_order, data_spectrum.flux_by_order, data_spectrum.error_by_order):
                 assert len(o_wlen) == len(o_flux) == len(o_errors), f"Data wavelength ({len(o_wlen)}), flux ({len(o_flux)}), and error ({len(o_errors)}) arrays must be of the same length within an order"
                 model_fluxes = [scale_model_to_order(o_wlen, s.wlen,s.flux, self.filter_type, self.filter_size) for s in modeled_spectra]
                 bad_mask = np.logical_or.reduce([np.isnan(f) for f in model_fluxes])
@@ -106,6 +114,7 @@ class NComponentModel(Sampler[CRIRESSpectrum, Spectrum]):
         return ds
     
     def get_errors_and_residuals(self, modeled_ds: Dataset[Spectrum]):
+        """ :meta private: """
         all_errors, all_residuals = [], []
         for _, modeled_spec in modeled_ds:
             all_errors.append(modeled_spec.errors)
@@ -132,28 +141,30 @@ class NComponentModel(Sampler[CRIRESSpectrum, Spectrum]):
     def save_results(self):
         super().save_results()
         
-        nights = self.best_models.coords["night"]
-        rows = []
+        try:
+            nights = self.best_models.coords["night"]
+            rows = []
 
-        for n in nights:
-            row = {"night":n}
-            for k, v in self.param_w_uncert.items():
-                if "rv" in k and n not in k:
-                    continue
-                pname = k.split(" (night=")[0].replace(": ","_")
-                val, (val_plus, val_minus,val_std) = v
-                
-                row[pname] = val
-                row[pname+"_plus"] = val_plus
-                row[pname+"_minus"] = val_minus
-                row[pname+"_std"] = val_std
-            rows.append(row)
-        
-        df = pd.DataFrame(rows)
-        df = df.sort_values("night")
-        df.to_csv(join(self.outdir,"best_params.csv"),index=None)
-        
-    
+            for n in nights:
+                row = {"night":n}
+                for k, v in self.param_w_uncert.items():
+                    if "rv" in k and n not in k:
+                        continue
+                    pname = k.split(" (night=")[0].replace(": ","_")
+                    val, (val_plus, val_minus,val_std) = v
+                    
+                    row[pname] = val
+                    row[pname+"_plus"] = val_plus
+                    row[pname+"_minus"] = val_minus
+                    row[pname+"_std"] = val_std
+                rows.append(row)
+            
+            df = pd.DataFrame(rows)
+            df = df.sort_values("night")
+            df.to_csv(join(self.outdir,"best_params.csv"),index=None)
+        except Exception as e:
+            self.write_out(f"Error saving best_params.csv: {e}. continuing anyway", level=logging.ERROR)
+
     def visualize_results(self):
         show = self.config.get("show_plots", False)
         try:    
@@ -162,7 +173,7 @@ class NComponentModel(Sampler[CRIRESSpectrum, Spectrum]):
             )
             for (selector, data_spectrum), ax in zip(self.data, axes):
                 model_spectrum = self.best_models.values(selector)
-                for o_wlen, o_flux in zip(data_spectrum.wlen_by_order, data_spectrum.flux_by_order):
+                for o_wlen, o_flux in zip(data_spectrum.wlen, data_spectrum.flux):
                     ax.plot(o_wlen, o_flux, color="gray", label="Data")
                     ax.plot(o_wlen, np.interp(o_wlen, model_spectrum.wlen, model_spectrum.flux), color="red", label="Model",alpha=0.75)
                 ax.set_title(", ".join(f"{k} = {v}" for k, v in selector.items()))

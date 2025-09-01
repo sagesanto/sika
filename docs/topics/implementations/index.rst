@@ -22,5 +22,5 @@ An implementation provided mostly as an example, this is a modeling pipeline des
 .. toctree::
     :hidden:
 
-    ./spectroscopy_api.rst
+    ./spectroscopy/index.rst
     ./general_implementations.rst

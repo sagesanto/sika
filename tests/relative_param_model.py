@@ -35,7 +35,7 @@ from dataclasses import dataclass
 import matplotlib.pyplot as plt
 from logging import Logger
 
-from sika.implementations.spectroscopy.spectra import Spectrum
+from sika.implementations.spectroscopy.spectra.spectrum import Spectrum
 from sika.provider import Provider, ContinuousProvider, Product
 from sika.task import Task
 from sika.modeling import (

@@ -1,7 +1,7 @@
 from os.path import join, exists
 from typing import Dict, List, Any, Tuple
 
-from .spectra import CRIRESSpectrum
+from sika.implementations.spectroscopy.crires.crires_spectrum import CRIRESSpectrum
 from sika.modeling import Dataset, DataLoader
 
 import warnings
@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore",module="astropy.stats.sigma_clipping")
 import numpy as np
 import pandas as pd
 
-
+__all__ = ["load_crires_spectrum", "CRIRESDataLoader"]
 
 def load_crires_spectrum(data_file: str, wavelength_file: str, wavelen_range: tuple, filter_size:int, filter_type:str, bp_sigma:int, masked_ranges:List[Tuple[int,int]]=None) -> CRIRESSpectrum:
     """Load a CRIRES spectrum from file.
@@ -104,4 +104,9 @@ class CRIRESDataLoader(DataLoader[CRIRESSpectrum]):
             s.metadata["directory"] = datadir
             spectra.append(s)
         
-        return Dataset(spectra, dims=["night"])
+        dims = ["night"]
+        # dims = []
+        # if len(merged_cfg["nights"]) > 1:
+        #     dims.append("night")
+
+        return Dataset(spectra, dims=dims)

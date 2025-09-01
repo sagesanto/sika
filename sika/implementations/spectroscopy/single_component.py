@@ -13,13 +13,15 @@ from logging import Logger
 
 from sika.modeling.priors import PriorTransform
 
-from .spectra import Spectrum
+from .spectra.spectrum import Spectrum
 from sika.provider import Provider
 from sika.task import Task
 from sika.modeling import Model, Dataset, ParameterSet, DataLoader, LnLikelihood
 
 from sika.config import Config
 from sika.utils import save_bestfit_dict, savefig, plot_corner
+
+__all__ = ["SingleComponentModel"]
 
 class SingleComponentModel(Task):
     supported_samplers = ['dynesty']

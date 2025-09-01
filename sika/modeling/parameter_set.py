@@ -38,6 +38,7 @@ class ParameterSet:
         """
         Set the coordinates for the parameters in the set.
         """
+        coords = {c:v for c,v in coords.items() if len(v)>1}  # remove any trivial coords
         _coords = {}  # the coords passed in are all possible coords, but this will be the coords actually used by the parameters in THIS set
         for p in self.params:
             p.set_coords(coords)

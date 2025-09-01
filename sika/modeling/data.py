@@ -208,7 +208,7 @@ class Dataset(Generic[T], ABC):
         """
         Get the product or xarray of products selected by ``context``, a dictionary that specifies some or all of the coordinates at which the Product(s) of interest are stored.
         """
-        if not self.coords or context is None:
+        if not self.coords or context is None or self.size==1:
             r = self._data
         else:
             selector = {}

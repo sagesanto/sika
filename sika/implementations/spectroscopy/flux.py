@@ -10,10 +10,12 @@ from sika.config.config import Config
 from sika.product import Product, FileWritableProduct, ArrayProduct1D
 from sika.provider import ContinuousProvider, IntermediateTask, Provider
 from sika.task import Task
-from .spectra import Spectrum
+from .spectra.spectrum import Spectrum
 from sika.utils import parse_path
 from .utils import integrate_flux
 import pandas as pd
+
+__all__ = ["Flux", "FluxIntegrator"]
 
 @dataclass(kw_only=True)
 class Flux(ArrayProduct1D):

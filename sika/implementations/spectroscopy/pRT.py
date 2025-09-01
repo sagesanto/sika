@@ -4,12 +4,14 @@ import numpy as np
 from petitRADTRANS.radtrans import Radtrans
 import time
 from sika.provider import Provider
-from .spectra import Spectrum
-from sika.implementations.spectroscopy.profile_models.profiles import PMMRModel, PTModel
+from .spectra.spectrum import Spectrum
+from sika.implementations.spectroscopy.atmospheres.profiles import PMMRModel, PTModel
 from sika.task import IntermediateTask
 import logging
 
 from sika.utils import suppress_stdout
+
+__all__ = ["pRT"]
 
 class pRT(Provider[Spectrum], IntermediateTask[Provider[Tuple[PTModel,PMMRModel]]]):
     """Generate a spectrum using petitRADTRANS for each provided profile model."""
