@@ -180,3 +180,12 @@ class EmptyParameterSet(ParameterSet):
         self.unfrozen = []
         self.frozen = []
         self.setup()
+        
+    
+class AuxiliaryParameterSet(ParameterSet):
+    def __init__(self, name: str = "auxiliary", **params: Parameter):
+        self.name = name
+        for k,v in params.items():
+            setattr(self, k, v)
+        self.setup()
+

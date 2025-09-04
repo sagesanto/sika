@@ -40,5 +40,5 @@ for d in config_dirs:
                 logger = configure_logger("config")
                 logger.warn(f"The default config '{join(d,f)}' has new keys that were not present in the active config '{active}'. Default values were copied over for the following new keys: {key_paths}")
 
-with open(config_path,"rb") as f:
-    config = tomlkit.load(f)
+# with open(config_path,"rb") as f:
+#     config = tomlkit.load(f)

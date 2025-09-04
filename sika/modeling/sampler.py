@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 
 from sika.task import Task
-from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintError
+from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintError, AuxiliaryParameterSet
 
 # this is required or pickling of things like lambdas will not work
 import dill
@@ -33,7 +33,7 @@ class Sampler(Generic[D,M], Task, ABC):
     
     supported_samplers = ['dynesty', "pymultinest"]
 
-    def __init__(self, run_prefix:str, outdir, data: Union[Dataset[D], DataLoader[D]], models: List[Model[M]], *args, loss=LnLikelihood(), data_params: Optional[Dict] = None, restore_from: Optional[str]=None, constraints: Optional[List[Constraint]]=None, **kwargs):
+    def __init__(self, run_prefix:str, outdir, data: Union[Dataset[D], DataLoader[D]], models: List[Model[M]], *args, loss=LnLikelihood(), data_params: Optional[Dict] = None, restore_from: Optional[str]=None, constraints: Optional[List[Constraint]]=None, aux_params:Optional[AuxiliaryParameterSet]=None, **kwargs):
         """Initialize the Sampler.
 
         :param run_prefix: a name for the run, used to name output files
@@ -54,6 +54,9 @@ class Sampler(Generic[D,M], Task, ABC):
         :type constraints: Optional[List[Constraint]], optional
         """
         super().__init__(*args, **kwargs)
+        if aux_params is None:
+            aux_params = AuxiliaryParameterSet()
+        self.aux_params = aux_params
         self.outdir = outdir
         self.run_prefix = run_prefix
         makedirs(outdir, exist_ok=True)
@@ -70,8 +73,8 @@ class Sampler(Generic[D,M], Task, ABC):
             self.data: Dataset[D] = None
         self.constraints = constraints if constraints is not None else []
 
-        self.params = [p for model in models for p in model.params]
-    
+        self.params = [p for model in models for p in model.params] + self.aux_params.unfrozen
+        
     @property
     def previous(self):
         if self.data_provider is not None:
@@ -83,6 +86,7 @@ class Sampler(Generic[D,M], Task, ABC):
         n = []
         for model in self.models:
             n.extend(model.param_names)
+        n.extend(self.aux_params.all_names())
         return n
         
     def node_spec(self) -> NodeSpec:
@@ -101,6 +105,8 @@ class Sampler(Generic[D,M], Task, ABC):
         args["loss"] = self.loss
         args["data_params"] = self._data_params
         args["restore_from"] = self.restore_from
+        args["constraints"] = self.constraints
+        args["aux_params"] = self.aux_params
         return args
         
     # def configure(self, config:Union[None,Config], logger: Union[None,Logger]):
@@ -123,8 +129,10 @@ class Sampler(Generic[D,M], Task, ABC):
     def set_model_params(self,parameters:List[float]):
         """ :meta private: """
         grouped_params = self._group_params(parameters)
+        aux_params = grouped_params.pop()
         for params, model in zip(grouped_params, self.models):
             model.set_params(params)
+        self.aux_params.set_values_flat(np.array(aux_params))
     
     def make_model(self,parameters:List[float]) -> Dataset[M]:
         """ Make a combined model from the flattened parameters and return it. """
@@ -188,6 +196,9 @@ class Sampler(Generic[D,M], Task, ABC):
             for transform in m.prior_transforms():
                 x[i] = transform(u[i])
                 i += 1
+        for transform in self.aux_params.get_unfrozen_transforms():
+            x[i] = transform(u[i])
+            i += 1
         return x
     
     def _setup(self):
@@ -210,8 +221,10 @@ class Sampler(Generic[D,M], Task, ABC):
             model.set_coords(
                 data_coords
             )  # inform the model of the data coordinates (will inform parameters)
-        self.nparams_per = [model.nvals for model in self.models]
-        self.write_out("Number of parameters per model:", self.nparams_per)
+        self.aux_params.set_coords(data_coords)
+        self.nparams_per = [model.nvals for model in self.models] + [self.aux_params.nvals]
+        self.write_out("Number of parameters per model:", self.nparams_per[:-1])
+        self.write_out("Number of auxiliary parameters:", self.nparams_per[-1])
         self.nparams = sum(self.nparams_per)
         self.write_out("Model setup complete.")
         if self.data.coords:

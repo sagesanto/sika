@@ -171,6 +171,10 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             fig, axes = plt.subplots(
                 nrows=self.data.size, ncols=1, figsize=(18, 6*self.data.size)
             )
+            try:
+                [a for a in axes]
+            except:
+                axes = [axes]
             for (selector, data_spectrum), ax in zip(self.data, axes):
                 model_spectrum = self.best_models.values(selector)
                 for o_wlen, o_flux in zip(data_spectrum.wlen, data_spectrum.flux):
@@ -190,6 +194,10 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
         try:
             n_nights = len(self.best_models.selectors)
             fig, axes = plt.subplots(nrows=n_nights, ncols=1,figsize=(6,3*n_nights))
+            try:
+                [a for a in axes]
+            except:
+                axes = [axes]
             for (sel, model), ax in zip(self.best_models,axes):
                 ax.set_title(sel["night"])
                 scale_factors = np.array(model.metadata["scale_factors"])
