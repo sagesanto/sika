@@ -201,7 +201,7 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             for (sel, model), ax in zip(self.best_models,axes):
                 ax.set_title(sel["night"])
                 scale_factors = np.array(model.metadata["scale_factors"])
-                model_names = list(model.metadata["model_disp_names"].keys())
+                model_names = [minfo["dispname"] for minfo in model.metadata["models"].values()]
                 for i, component in enumerate(model_names):
                     s_f = scale_factors[:,i]
                     ax.plot(np.arange(len(s_f)),s_f,label=component)
