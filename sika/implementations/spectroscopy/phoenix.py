@@ -67,16 +67,16 @@ class Phoenix(Provider):
     @property
     def provided_parameters(self):
         return {
-            "temp": np.concatenate(
+            "teff": np.concatenate(
                 (np.arange(2300, 7000, 100),
                  np.arange(7000, 12000, 200))),
             "logg": np.arange(0.0,6.0,0.5)
         }
         
     def _call(self, parameters):
-        teff, logg = parameters["temp"], parameters["logg"]
-        if teff not in self.provided_parameters["temp"]:
-            raise ValueError(f"Invalid temperature: {teff}. Valid temperature values are {self.provided_parameters['temp']}.")
+        teff, logg = parameters["teff"], parameters["logg"]
+        if teff not in self.provided_parameters["teff"]:
+            raise ValueError(f"Invalid temperature: {teff}. Valid temperature values are {self.provided_parameters['teff']}.")
         if logg not in self.provided_parameters["logg"]:
             raise ValueError(f"Invalid logg: {logg}. Valid logg values are {self.provided_parameters['logg']}.")
         

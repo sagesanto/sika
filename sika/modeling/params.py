@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Union, Dict, TypeVar, Generic, Tuple, Op
 import numpy as np
 import xarray as xr
 from sika.modeling.priors import PriorTransform
-from sika.utils import groupby
+from sika.utils import groupby, joint_iter as joint_iter_generic, broadcast
 from .constraint import Constraint
 
 __all__ = ["Parameter", "RelativeParameter", "DeltaParameter"]
@@ -282,6 +282,11 @@ class Parameter(ABC):
     
     def __gt__(self, other) -> Constraint:
         return Constraint(self, other, lambda a,b: a > b)
+    
+
+def joint_iter(*params: Parameter):
+    for (x) in joint_iter_generic(*[p.as_xarray() for p in params]):
+        yield x
     
     
 class RelativeParameter(Parameter, ABC):

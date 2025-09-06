@@ -50,6 +50,9 @@ class ParameterSet:
         self.selectors = [dict(zip(c_keys, combo)) for combo in all_combos]
         
     def __iter__(self):
+        if not self.selectors:
+            yield {}, self.sel({})
+            return
         for selector in self.selectors:
             yield selector, self.sel(selector)
 

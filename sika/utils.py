@@ -406,3 +406,48 @@ def get_process_info():
     mem = psutil.Process(os.getpid()).memory_info().rss / 1e9
     pid = os.getpid()
     return mem, pid
+
+
+def compare_evidence(filename1, filename2):
+    '''
+    Computes evidence of fit2 / evidence of fit1
+    If this value is >> 1, fit 2 is statistically favored
+
+    Returns: 
+    dz (float): ratio of evidences
+
+    '''
+    from dynesty import NestedSampler
+    import pickle
+
+    # old dynesty (v 1.1)
+    try: 
+        file = pickle.load( open(filename1, 'rb') )
+        file2 = pickle.load( open(filename2, 'rb') )
+        last_logz = file['logz'][-1]
+
+    except Exception as e:
+        print('new dynesty live file...')
+        file = NestedSampler.restore(filename1).results
+        file2 = NestedSampler.restore(filename2).results
+    
+    # baseline file to compare against
+    last_logz = file['logz'][-1]
+    last_logz_last100 = np.median(file['logz'][-100:])
+
+    # print(file.keys())
+    last_logz2 = file2['logz'][-1]
+    last_logz2_last100 = np.median(file2['logz'][-100:])
+
+    print('number of iterations for 1 vs 2:')
+    print(file['niter'], file2['niter'])
+
+    print('final loglike for 1 vs 2:')
+    print(file['logl'][-1], file2['logl'][-1])
+
+    dz = np.exp(last_logz2 - last_logz)
+    print('logz for 1 vs 2: ')
+    print(last_logz, last_logz2)
+    last_100_dz = np.exp(last_logz2_last100 - last_logz_last100)
+
+    return dz, last_100_dz

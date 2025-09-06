@@ -25,9 +25,8 @@ def plot_crires_model(
 
     model_wlen = model.wlen[mask]
     model_flux = model.flux[mask]
-    model_errors = model.errors[
-        mask
-    ]  # this is the data error multiplied by a error inflation term (based on goodness of scale factor optimization)
+    # this is the data error multiplied by an error inflation term (based on goodness of scale factor optimization)
+    model_errors = model.errors[mask]
     residuals = model.metadata["residuals"][mask]
     resid_sigma = residuals / model_errors
     chi_sq = np.sum(residuals**2 / model_errors**2)
@@ -51,9 +50,9 @@ def plot_crires_model(
 
 # --------- Plot individual models -------
     rename_dict = model.metadata.get("model_disp_names",{})
-    for k, v in model.metadata["individual_model_fluxes"].items():
-        name = rename_dict.get(k,k)
-        indiv_ax.plot(model_wlen, v[spectral_order]+NORM_ADD_FACTOR, label=name)
+    for k, v in model.metadata["models"].items():
+        name = v["dispname"]
+        indiv_ax.plot(model_wlen, v["flux"][spectral_order]+NORM_ADD_FACTOR, label=name)
 
     indiv_ax.set_title(
         f"Reduced $\chi^2$={reduced_chi_2:.4f}, order {spectral_order}, {selector_str}"
@@ -61,7 +60,7 @@ def plot_crires_model(
     indiv_ax.set_xlim(*wlen_range)
     indiv_ax.set_xticks([])
     indiv_ax.set_ylabel("Normalized flux", fontsize=12)
-    indiv_ax.legend(ncols=len(model.metadata["individual_model_fluxes"]),loc="lower right")
+    indiv_ax.legend(ncols=len(model.metadata["models"]),loc="lower right")
 
 # -------- Plot Model vs Data -----------
     target_name = data.metadata.get("display_name",data.metadata.get("target","Data"))

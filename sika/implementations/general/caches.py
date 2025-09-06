@@ -35,6 +35,7 @@ class FileCache(ProviderMiddleware[T]):
     def _call(self, params):
         filepath = join(self.savedir, self.target_cls.filename(params))
         if not exists(filepath) or not self.load:
+            self.write_out(f"Cache miss for {self.target_cls.__name__} at {filepath}", level=logging.DEBUG)
             product = self.prev(params)
             if self.save:
                 self.write_out(f"Saving {self.target_cls.__name__} to {filepath}", level=logging.DEBUG)

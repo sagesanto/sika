@@ -9,6 +9,7 @@ import scipy.ndimage as ndi
 import matplotlib.pyplot as plt
 
 from .crires.crires_spectrum import CRIRESSpectrum
+from .crires.plotting import plot_crires_model
 from sika.implementations.spectroscopy.utils import optimize_scale_factors
 
 from .spectra.spectrum import Spectrum
@@ -188,7 +189,7 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             if show:
                 plt.show()
         except Exception as e:
-            print('Combined best model plot failed')
+            self.write_out('Combined best model plot failed',level=logging.WARNING)
             print(e)
                         
         try:
@@ -211,21 +212,24 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             plt.tight_layout()
             savefig("scale_factors.png", self.config, outdir=self.outdir)
         except Exception as e:
-            print('Scale-factor plot failed')
+            self.write_out('Scale-factor plot failed',level=logging.WARNING)
             print(e)
+            
+        plt.cla()
+        try:
+            for selector, data_spectrum in self.data:
+                model_spectrum = self.best_models.values(selector)
+                for order in range(data_spectrum.norders):
+                    plot_crires_model(model_spectrum, data_spectrum, order, selector)
+                    savefig(f"best_o{order}_{selector}.png", config=self.config, outdir=self.outdir)
+                    plt.close()
+        except Exception as e:
+            self.write_out('Order-by-order best fit plots failed',level=logging.WARNING)
+            print(e)
+            
             
         plt.cla()
         
         super().visualize_results()
 
             
-        # try:
-        #     for selector, data_spectrum in self.data:
-        #         model_spectrum = self.best_models.values(selector)
-        #         for order in range(data_spectrum.norders):
-        #             plot_crires_model(model_spectrum, data_spectrum, order, selector)
-        #             savefig(f"best_o{order}_{selector}.png", config=self.config, outdir=self.outdir)
-        #             plt.close()
-        # except Exception as e:
-        #     print('Order-by-order best fit plots failed')
-        #     print(e)
