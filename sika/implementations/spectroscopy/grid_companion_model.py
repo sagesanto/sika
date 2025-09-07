@@ -46,10 +46,10 @@ class PhoenixCompanionParameterSet(CompanionParameterSet):
         name: str,
         rv: Union[PriorTransform, Parameter],
         vsini: Union[PriorTransform, Parameter],
-        temp: Union[PriorTransform, Parameter],
+        teff: Union[PriorTransform, Parameter],
         logg: Union[PriorTransform, Parameter]
     ):
-        super().__init__(name, rv, vsini, temp=temp, logg=logg)
+        super().__init__(name, rv, vsini, teff=teff, logg=logg)
 
 
 

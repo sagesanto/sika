@@ -10,13 +10,13 @@ from sika.implementations.spectroscopy import Spectrum
 
 __all__ = ["Phoenix","download_PHOENIX_stellar_model"]
 
-def download_PHOENIX_stellar_model(temp, logg, url='https://phoenix.astro.physik.uni-goettingen.de/data/v2.0/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-0.0/'):
+def download_PHOENIX_stellar_model(teff, logg, url='https://phoenix.astro.physik.uni-goettingen.de/data/v2.0/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-0.0/'):
     """
     Get the PHOENIX stellar model.
 
     Parameters
     ----------
-    temp: int
+    teff: int
         The effective temperature of the standard star.
     wave_cut: list
         The wavelength range to use for the stellar model.
@@ -31,21 +31,21 @@ def download_PHOENIX_stellar_model(temp, logg, url='https://phoenix.astro.physik
         The flux of the stellar model.
     """
     
-    if temp < 2300 or temp > 12000:
-        raise ValueError(f"Telluric temperature {temp} K is out of Phoenix model range (2300-12000 K).")
+    if teff < 2300 or teff > 12000:
+        raise ValueError(f"Telluric temperature {teff} K is out of Phoenix model range (2300-12000 K).")
     
-    modulus = 100 if temp < 7000 else 200
-    if temp % modulus != 0:
-        raise ValueError(f"Telluric temperature {temp} K is not a multiple of {modulus} K!")
+    modulus = 100 if teff < 7000 else 200
+    if teff % modulus != 0:
+        raise ValueError(f"Telluric temperature {teff} K is not a multiple of {modulus} K!")
 
-    filename = f'lte{temp:05d}-{logg:.2f}-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits'
+    filename = f'lte{teff:05d}-{logg:.2f}-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits'
     # if not os.path.isfile(f"models/{filename}"):
-    print(f"Downloading PHOENIX stellar model T={temp} K")
+    print(f"Downloading PHOENIX stellar model T={teff} K")
     r = requests.get(url+filename, timeout=10)
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError as err:
-        raise RuntimeError(f"Failed to download a Phoenix stellar model for temp={temp}, logg={logg} ({url}): {err}") from err
+        raise RuntimeError(f"Failed to download a Phoenix stellar model for temp={teff}, logg={logg} ({url}): {err}") from err
 
     # with open(f"models/{filename}", "wb") as f:
     #     f.write(r.content)
@@ -76,7 +76,7 @@ class Phoenix(Provider):
     def _call(self, parameters):
         teff, logg = parameters["teff"], parameters["logg"]
         if teff not in self.provided_parameters["teff"]:
-            raise ValueError(f"Invalid temperature: {teff}. Valid temperature values are {self.provided_parameters['teff']}.")
+            raise ValueError(f"Invalid teff: {teff}. Valid teff values are {self.provided_parameters['teff']}.")
         if logg not in self.provided_parameters["logg"]:
             raise ValueError(f"Invalid logg: {logg}. Valid logg values are {self.provided_parameters['logg']}.")
         
