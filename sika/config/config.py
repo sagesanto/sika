@@ -218,7 +218,31 @@ class Config:
             if self.has_defaults:
                 return self._get_default(index)
             raise KeyError(f"Key '{index}' not found in config {self._filepath}" + (f"or defaults {self._default_path}" if self.has_defaults else ""))
+    
+    @staticmethod
+    def parse_toml_value(val):
+        try:
+            return tomlkit.value(val)
+        except tomlkit.exceptions.UnexpectedCharError: 
+            # it's probably a string
+            return val
+    
+    @staticmethod
+    def _set_nested(cfg, key:str, val):
+        keys = key.split(".")
+        if len(keys) == 1:
+            cfg[key] = Config.parse_toml_value(val)
+            return cfg
         
+        top_key = keys[0]
+        remaining_keys = ".".join(keys[1:])
+        if cfg.get(top_key) is None:
+            cfg[top_key] = {}
+        
+        set_to = Config._set_nested(cfg[top_key], remaining_keys, val)
+        cfg[top_key] = set_to
+        return cfg
+    
     def __setitem__(self,index:str,new_val:Any):
         """Set the value of a new or existing key in the config. Will set the value in the selected profile, if one has been selected. See also: :py:meth:`~Config.set`
 
@@ -227,11 +251,12 @@ class Config:
         :param new_val: the new value to assign
         :type new_val: Any
         """
+        
         if self.selected_profile:
-            self.selected_profile[index] = new_val
-            return
-        self._cfg[index] = new_val
-    
+            Config._set_nested(self.selected_profile, index, new_val)
+        else:
+            Config._set_nested(self._cfg, index, new_val)
+                
     def __str__(self):
         self_str = ""
         if self.selected_profile:

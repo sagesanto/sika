@@ -6,7 +6,7 @@ import psutil
 from os import makedirs
 from os.path import join, exists, abspath, expanduser
 import logging
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from pytz import UTC as dtUTC
 import numpy as np
@@ -19,10 +19,12 @@ import enum
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 
+from argparse import ArgumentParser
+
 import xarray as xr
 
 
-from .config import Config
+from .config import Config, config_path
 
 class NodeShape(enum.Enum):
     """Enum for node shapes in the pipeline visualization."""
@@ -451,3 +453,38 @@ def compare_evidence(filename1, filename2):
     last_100_dz = np.exp(last_logz2_last100 - last_logz_last100)
 
     return dz, last_100_dz
+
+def sika_argparser(description:str="Run this model", default_cfg_path:Optional[str]=None):
+    if default_cfg_path is None:
+        default_cfg_path = config_path
+    parser = ArgumentParser(description=description)
+    parser.add_argument("run_name", type=str, help="Name of this run")
+    parser.add_argument("--config", type=str, default=default_cfg_path, help="Path to config file")
+    parser.add_argument(
+        "--restore-from",
+        type=str,
+        default=None,
+        help="Path to a sampler save file to resume from",
+    )
+    parser.add_argument(
+        "--outdir",
+        type=str,
+        default=None,
+        help="Path to output directory. will be created if does not exist. If not specified, will be created from model_out/<model_name>/<run_name>_<timestamp>",
+    )
+    
+    return parser
+
+def parse_sika_args(parser:ArgumentParser):
+    args = parser.parse_args()
+    config_path = parse_path(args.config)
+    restore_from = args.restore_from
+    run_name = args.run_name
+    if restore_from is not None:
+        restore_from = parse_path(restore_from)
+        
+    outdir = args.outdir
+    if outdir is not None:
+        outdir = parse_path(outdir)
+    
+    return run_name, config_path, restore_from, outdir, args
