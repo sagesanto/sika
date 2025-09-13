@@ -40,6 +40,13 @@ class PriorTransform(ABC):
         d["class"] = self.__class__.__name__
         return d
 
+    # @abstractmethod
+    # def log_prior(self, value: float) -> float:
+    #     """
+    #     Return the log prior probability of a value. This is only implemented for some prior transforms.
+    #     """
+        
+
 
 class NullPriorTransform(PriorTransform):
     """
@@ -51,6 +58,9 @@ class NullPriorTransform(PriorTransform):
 
     def _to_dict(self):
         return {}
+    
+    # def log_prior(self, value: float) -> float:
+    #     raise NotImplementedError("NullPriorTransform does not implement log_prior")
 
 
 class Uniform(PriorTransform):
@@ -79,6 +89,9 @@ class Uniform(PriorTransform):
             "min_val": self.min_val,
             "max_val": self.max_val,
         }
+        
+    # def log_prior(self, value: float) -> float:
+    #     return 
 
 
 class Normal(PriorTransform):

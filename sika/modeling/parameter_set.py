@@ -186,7 +186,7 @@ class EmptyParameterSet(ParameterSet):
         
     
 class AuxiliaryParameterSet(ParameterSet):
-    def __init__(self, name: str = "auxiliary", **params: Parameter):
+    def __init__(self, name: str = "auxiliary", **params: Union[Parameter, PriorTransform]):
         self.name = name
         for k,v in params.items():
             setattr(self, k, v)

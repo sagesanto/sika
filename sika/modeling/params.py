@@ -7,7 +7,7 @@ from sika.modeling.priors import PriorTransform
 from sika.utils import groupby, joint_iter as joint_iter_generic, broadcast
 from .constraint import Constraint
 
-__all__ = ["Parameter", "RelativeParameter", "DeltaParameter"]
+__all__ = ["Parameter", "RelativeParameter", "DeltaParameter", "UnitRelativeParameter", "joint_iter"]
 
 # name, prior transform, value
 class Parameter(ABC):
@@ -377,3 +377,22 @@ class DeltaParameter(RelativeParameter):
     def __repr__(self):
         return f"RelativeParameter("+",".join([repr(p) for p in self.params])+")"
 
+
+class UnitRelativeParameter(RelativeParameter):
+    """A Parameter whose value is simply the same as another :py:class:`Parameter <sika.modeling.params.Parameter>`"""
+
+    def __init__(self, name: str, param: Parameter) -> None:
+        """
+        :param name: the human-readable name of the quantity that this :py:class:`~sika.modeling.params.Parameter` represents
+        :type name: str
+        :param param: the Parameter to mirror
+        :type param: :py:class:`~sika.modeling.params.Parameter`
+        """
+        super().__init__(name, param)
+    
+    def apply_relation(self, param: Parameter) -> xr.DataArray:
+        """:meta private:"""
+        return param.as_xarray()
+    
+    def __repr__(self):
+        return f"UnitRelativeParameter({repr(self.params[0])})"

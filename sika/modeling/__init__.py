@@ -2,7 +2,7 @@
 
 from .priors import Normal, NullPriorTransform, PriorTransform, Uniform
 from .constraint import BaseConstraint, Constraint, ListConstraint, ConstraintError
-from .params import Parameter, RelativeParameter, DeltaParameter
+from .params import Parameter, RelativeParameter, DeltaParameter, UnitRelativeParameter, joint_iter
 from .parameter_set import ParameterSet, EmptyParameterSet, AuxiliaryParameterSet
 from .models import Model, CompositeModel
 from .data import Dataset, DataLoader #, ProviderDataLoader

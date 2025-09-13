@@ -1,12 +1,13 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from dataclasses import dataclass
+from matplotlib.axes import Axes
+from typing import List, Tuple, Optional
+
 from sika.implementations.spectroscopy.spectra.spectrum import Spectrum
 from sika.implementations.spectroscopy.utils import clean_and_normalize_spectrum
 
 
-import numpy as np
-
-
-from dataclasses import dataclass
-from typing import List, Tuple
 
 __all__ = ["CRIRESSpectrum"]
 
@@ -73,3 +74,46 @@ class CRIRESSpectrum(Spectrum):
             indices.append(np.arange(len(self.wlen)))
 
         return indices
+    
+    
+    def plot(self, ax:Optional[List[Axes]]=None, **kwargs):
+        """
+        Plot the spectrum on the given axes.
+        """
+        norders = len(self.wlen)
+        if ax is None:
+            fig, ax = plt.subplots(nrows=norders, figsize=(12, 4*norders))
+        
+        merged_kwargs = {
+            "alpha":0.5
+        }
+        
+        merged_kwargs.update(kwargs)
+
+        for i in range(norders):
+            ax[i].plot(self.wlen[i], self.flux[i], **merged_kwargs)
+            if self.errors is not None:
+                ax[i].fill_between(self.wlen[i], self.flux[i] - self.errors[i], self.flux[i] + self.errors[i], alpha=0.2)
+            ax[i].set_ylabel(r"Flux [arbitrary]", fontsize=12)
+            ax[i].minorticks_on()
+            ax[i].tick_params(
+                axis="both",
+                which="major",
+                color="k",
+                length=18,
+                width=2,
+                direction="in",
+                labelsize=16,
+            )
+            ax[i].tick_params(
+                axis="both",
+                which="minor",
+                color="k",
+                length=12,
+                width=1,
+                direction="in",
+                labelsize=16,
+            )
+        ax[-1].set_xlabel("Wavelength [microns]", fontsize=12)
+        
+        return ax

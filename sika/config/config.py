@@ -223,7 +223,7 @@ class Config:
     def parse_toml_value(val):
         try:
             return tomlkit.value(val)
-        except tomlkit.exceptions.UnexpectedCharError: 
+        except (tomlkit.exceptions.UnexpectedCharError, tomlkit.exceptions.InvalidNumberError): 
             # it's probably a string
             return val
     
