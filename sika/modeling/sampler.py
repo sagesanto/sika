@@ -14,12 +14,13 @@ from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 
 from sika.task import Task
-from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintError, AuxiliaryParameterSet
+from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintViolation, AuxiliaryParameterSet
 
 # this is required or pickling of things like lambdas will not work
 import dill
 import dynesty.utils
 dynesty.utils.pickle_module = dill
+logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
 
 from sika.utils import NodeSpec, NodeShape, save_bestfit_dict, savefig, plot_corner, get_mpi_info, get_process_info
 from sika.product import Product
@@ -169,9 +170,8 @@ class Sampler(Generic[D,M], Task, ABC):
         
         try:
             modeled_ds = self.make_model(parameters)
-        except ConstraintError as e:
-            self.write_out(f"Constraint(s) invalid for parameters {parameters}. Returning -np.inf")
-            self.write_out(f"Constraint message: {e}")
+        except ConstraintViolation as e:
+            self.write_out(f"Constraint(s) violated for parameters {parameters}: {e}. Returning -np.inf")
             return -np.inf
         
         errors, residuals = self.get_errors_and_residuals(modeled_ds)
@@ -257,6 +257,7 @@ class Sampler(Generic[D,M], Task, ABC):
     def fit(self, pool=None):
         self.run_sampler(pool)
         self.save_results()
+        logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
         self.visualize_results()
             
         # self.logprob_chain, self.plot_chain, self.max_params

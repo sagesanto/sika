@@ -215,7 +215,13 @@ class Dataset(Generic[T], ABC):
             for k in self.coords:
                 if k in context:
                     selector[k] = context[k]
-            r = self._data.sel(**selector)
+            try:
+                r = self._data.sel(**selector)
+            except Exception as e:
+                print(f"selector: {selector}")
+                print(f"data coords: {self.coords}")
+                print(f"self dims: {self.dims}")
+                raise e
         try:
             return r.item()
         except (ValueError, AttributeError):

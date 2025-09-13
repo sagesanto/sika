@@ -13,7 +13,7 @@ from .crires.plotting import plot_crires_model
 from sika.implementations.spectroscopy.utils import optimize_scale_factors
 
 from .spectra.spectrum import Spectrum
-from sika.modeling import Sampler, Dataset, ConstraintError
+from sika.modeling import Sampler, Dataset
 
 # this is required or pickling of things like lambdas will not work
 import dill
@@ -27,8 +27,33 @@ __all__ = ["NComponentSampler", "scale_model_to_order"]
 def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_flux:np.ndarray, filter_type, filter_size) -> np.ndarray:
     # take a model representing the entire spectrum and crop/scale it to a specific order in the data
     # returns the scaled flux array for that order
-    
+    # print(model_wlen)
+    # order_wlen = np.asarray(order_wlen)
+    # model_wlen = np.asarray(model_wlen)
+    # model_flux = np.asarray(model_flux)
+    # print("----- scaling -------")
+    # print("order wlen shape:", order_wlen.shape)
+    # print("model wlen shape:", model_wlen.shape)
+    # print("model flux shape:", model_flux.shape)
+    # print("order wlen bounds:", order_wlen.min(), order_wlen.max())
+    # print("model wlen bounds:", model_wlen.min(), model_wlen.max())
+    # print(len(np.where(np.isnan(order_wlen))[0]),"NaNs in order_wlen")
+    # print(len(np.where(np.isnan(model_wlen))[0]),"NaNs in model_wlen")
+    # print(len(np.where(np.isnan(model_flux))[0]),"NaNs in model_flux")
     f = np.interp(order_wlen, model_wlen, model_flux)
+    nans_in_interp = len(np.where(np.isnan(f))[0])
+    # print(nans_in_interp,"NaNs in interpolated flux")
+    if nans_in_interp == len(f):
+        print("WARNING: interpolating the model flux to the order wavelength produced all NaNs. This likely means that the model wavelength range does not overlap with the order wavelength range at all, or that the model flux contains many NaNs. Continuing, but this will likely cause problems later.")
+        print("order wlen bounds:", order_wlen.min(), order_wlen.max())
+        print("model wlen bounds:", model_wlen.min(), model_wlen.max())
+        print("order wlen shape:", order_wlen.shape)
+        print("model wlen shape:", model_wlen.shape)
+        print("model flux shape:", model_flux.shape)
+        print("model:", np.c_[model_wlen, model_flux])
+        between = (model_wlen >= order_wlen.min()) & (model_wlen <= order_wlen.max())
+        print("model between min/max of order:", np.c_[model_wlen[between], model_flux[between]])
+    # print("interpolated flux shape:", f.shape)
     bad = np.where(np.isnan(f))  # get bad indices
     f[bad] = np.nanmedian(f)
     if filter_type == 'median':
@@ -39,6 +64,7 @@ def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_f
         raise ValueError(f"Filter type {filter_type} not recognized. Use 'median' or 'gaussian'.")
     f = f - continuum
     f[bad] = np.nan
+    # print("----- done scaling -------")
     return f
 
 class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
@@ -60,7 +86,7 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen, data_spectrum.flux, data_spectrum.errors):
             # for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen_by_order, data_spectrum.flux_by_order, data_spectrum.error_by_order):
                 assert len(o_wlen) == len(o_flux) == len(o_errors), f"Data wavelength ({len(o_wlen)}), flux ({len(o_flux)}), and error ({len(o_errors)}) arrays must be of the same length within an order"
-                model_fluxes = [scale_model_to_order(o_wlen, s.wlen,s.flux, self.filter_type, self.filter_size) for s in modeled_spectra]
+                model_fluxes = [scale_model_to_order(o_wlen, s.wlen_flat,s.flux_flat, self.filter_type, self.filter_size) for s in modeled_spectra]
                 bad_mask = np.logical_or.reduce([np.isnan(f) for f in model_fluxes])
                 
                 for (start_wlen, end_wlen) in self.masked_ranges:

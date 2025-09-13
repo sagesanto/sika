@@ -99,3 +99,15 @@ class KPICSpectrum(Spectrum):
         self.wlen = wlen_by_order
         self.errors = error_by_order
         self.trace_sigmas = np.array(trace_sigmas)[orders]
+
+    @property
+    def wlen_flat(self) -> np.ndarray:
+        return np.concatenate(self.wlen)
+    
+    @property
+    def flux_flat(self) -> np.ndarray:
+        return np.concatenate(self.flux)
+    
+    @property
+    def errors_flat(self) -> np.ndarray:
+        return np.concatenate(self.errors)

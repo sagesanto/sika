@@ -235,11 +235,29 @@ def optimize_scale_factors(data_flux, data_error, model_fluxes: List[np.ndarray]
     """ optimize scale factors to find the best-fit linear combination of model fluxes to match the data fluxes """
     scale_factors = []
     ncomp = len(model_fluxes)
-    # how to construct linear model for two component model?
-    # print("data_flux shape:", data_flux.shape)
+    # print(len(np.where(np.isnan(data_flux))[0]),"NaNs in data_flux")
+    # print(len(np.where(np.isnan(data_error))[0]),"NaNs in data_error")
+    # print(len(np.where(np.isnan(model_fluxes))[0]),"NaNs in model_fluxes")
+    # # how to construct linear model for two component model?
     # print("n models:", ncomp)
+    # print("data_flux shape:", data_flux.shape)
+    # print("data_error shape:", data_error.shape)
+    # print("model_fluxes:", model_fluxes)
+    
     y_model = np.array(model_fluxes).T
     # print("y_model shape:", y_model.shape)
+    invalid = False
+    if y_model.shape[0] == 0:
+        print(f"WARNING: trying to optimize scale factors but the model fluxes have zero length! (shape {y_model.shape})")
+        invalid = True
+    if data_flux.shape[0] == 0:
+        print(f"WARNING: trying to optimize scale factors but the data flux has zero length! (shape {data_flux.shape})")
+        invalid = True
+    if data_error.shape[0] == 0:
+        print(f"WARNING: trying to optimize scale factors but the data error has zero length! (shape {data_error.shape})")
+        invalid = True
+    if invalid:
+        return [0.0]*ncomp, np.inf
     #cov = np.array([comp.eflux[d][c]**2 + 10**this_emult, comp.eflux[d][c]**2 + 10**this_emult]).T
     cov = np.array([data_error**2]*ncomp).T
     # print("cov shape:", cov.shape)

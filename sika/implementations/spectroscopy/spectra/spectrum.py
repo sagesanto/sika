@@ -41,6 +41,18 @@ class Spectrum(DFProduct):
         self.flux = self.flux[mask]
         return self
     
+    @property
+    def wlen_flat(self) -> np.ndarray:
+        return self.wlen
+    
+    @property
+    def flux_flat(self) -> np.ndarray:
+        return self.flux
+    
+    @property
+    def errors_flat(self) -> np.ndarray:
+        return self.errors
+
     def plot(self, ax=None, **kwargs):
         """
         Plot the spectrum on the given axes.

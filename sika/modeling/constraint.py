@@ -1,10 +1,13 @@
-__all__ = ["BaseConstraint", "Constraint", "ListConstraint"]
+__all__ = ["BaseConstraint", "Constraint", "ListConstraint", "ConstraintViolation", "ConstraintError"]
 from abc import ABC, abstractmethod
 from typing import Any, List, Callable
 import numpy as np
 
 class ConstraintError(BaseException):
     """Exception indicating that something about the construction of a constraint is wrong"""
+    
+class ConstraintViolation(BaseException):
+    """Exception indicating that a constraint was violated during sampling"""
 
 class BaseConstraint:
     """ Base class for a constraint on an object ``val`` with respect to some object ``other`` of any type. note that the abstract :py:meth:`~BaseConstraint._compare` method here is responsible for manipulating the ``val`` and ``other`` objects before performing some actual comparison."""
@@ -20,6 +23,9 @@ class BaseConstraint:
         :rtype: bool
         """
     
+    def failure_message(self) -> str:
+        return f"Constraint {self} failed."
+    
     def validate(self, raise_on_invalid=False) -> bool:
         """Determine whether or not this constraint is satisfied.
 
@@ -28,7 +34,7 @@ class BaseConstraint:
         """
         r = self._compare()
         if not r and raise_on_invalid:
-            raise ConstraintError(f"Constraint {self} failed. Returning -np.inf")
+            raise ConstraintViolation(self.failure_message())
         return r
 
 class Constraint(BaseConstraint):
@@ -43,7 +49,7 @@ class Constraint(BaseConstraint):
         >>> Constraint(param=P1, other=0, comparison_func:lambda a,b: a < b)
         
     """
-    def __init__(self, param, other:Any,comparison_func):
+    def __init__(self, param, other:Any,comparison_func, message_formatter:Callable[[Any,Any],str]=lambda a,b: f"{a} ? {b}"):
         """A constraint on the value of a :py:class:`~sika.modeling.params.Parameter` with respect to a constant or another :py:class:`~sika.modeling.params.Parameter`.
 
         :param param: the Parameter whose value should be constrained
@@ -67,6 +73,11 @@ class Constraint(BaseConstraint):
         except AttributeError:  # this means the other is not a parameter
             pass
         
+        self.message_formatter = message_formatter
+        
+    def failure_message(self) -> str:
+        return f"Constraint failed: {self.message_formatter(self.val, self.other)}"
+    
     def _compare(self):
         # if self.relative:
         # for selector, (value, other) in joint_iter(self.param.)

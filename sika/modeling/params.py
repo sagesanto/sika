@@ -238,7 +238,7 @@ class Parameter(ABC):
             self.set_values(xr.DataArray(reshaped))
 
     def __repr__(self) -> str:
-        return f"{self.name}(prior_transform={self.prior_transform}, values={self._values}, frozen={self.frozen})"
+        return f"{self.name}(prior_transform={self.prior_transform}, coords={self.coords}, values={self.flattened()}, frozen={self.frozen})"
 
     def to_dict(self) -> Dict[str, Any]:
         return {

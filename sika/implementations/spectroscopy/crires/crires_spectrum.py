@@ -75,6 +75,17 @@ class CRIRESSpectrum(Spectrum):
 
         return indices
     
+    @property
+    def wlen_flat(self) -> np.ndarray:
+        return np.concatenate(self.wlen)
+    
+    @property
+    def flux_flat(self) -> np.ndarray:
+        return np.concatenate(self.flux)
+    
+    @property
+    def errors_flat(self) -> np.ndarray:
+        return np.concatenate(self.errors)
     
     def plot(self, ax:Optional[List[Axes]]=None, **kwargs):
         """
