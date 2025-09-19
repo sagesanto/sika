@@ -206,7 +206,7 @@ class Dataset(Generic[T], ABC):
     
     def values(self, context: Optional[Dict[str, Any]] = None) -> Any:
         """
-        Get the product or xarray of products selected by ``context``, a dictionary that specifies some or all of the coordinates at which the Product(s) of interest are stored.
+        Get the :py:class:`~sika.product.Product` or xarray of Products selected by ``context``, a dictionary that specifies some or all of the coordinates at which the Product(s) of interest are stored.
         """
         if not self.coords or context is None or self.size==1:
             r = self._data

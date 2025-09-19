@@ -18,6 +18,8 @@ import pandas as pd
 import tqdm
 
 from sika.utils import parse_path, write_out
+from sika.config import Config
+from sika.modeling import Dataset
 
 def jd_to_dt(hjd):
     time = Time(hjd, format='jd', scale='tdb')
@@ -291,7 +293,7 @@ def optimize_scale_factors(data_flux, data_error, model_fluxes: List[np.ndarray]
 # adapted from jerry xuan
 # filt_type -> filter_type: can be 'median' or 'gaussian'
 # medfilt -> filter_size: size of the median filter to apply
-def clean_and_normalize_spectrum(fluxes,wavelengths,errors, bp_sigma=3, filter_type='median', filter_size=100):
+def clean_and_normalize_spectrum(fluxes, wavelengths, errors, bp_sigma=3, filter_type='median', filter_size=100):
     clipped_indices = stats.sigma_clip(fluxes, sigma=bp_sigma)
     spike_inds = np.where(clipped_indices.mask==True)
     # print(f"deleting {sum(len(i) for i in spike_inds)} spike points")
@@ -312,3 +314,39 @@ def clean_and_normalize_spectrum(fluxes,wavelengths,errors, bp_sigma=3, filter_t
     # May 21, 2024 - do not add the constant factor back anymore 
     fluxes = fluxes - continuum
     return fluxes, wavelengths, errors, norm_constant
+
+class KBandLossAdjustment:
+    """Contributes a penalty term for deviation from the observed k-band flux to the loss of a binary model. This is very simple to implement and pretty specific in its expectation of the metadata structure of the model. It's probably easier to write a new one for your specific use case than to try to conform to this one."""
+    def __init__(self, obs_kband_ratio: float, kband_ratio_error: float):
+        self.obs_kband_ratio = obs_kband_ratio
+        self.kband_ratio_error = kband_ratio_error
+
+    def __call__(self, loss: float, parameters: List[float], model: Dataset, data: Dataset, errors: np.ndarray, residuals: np.ndarray, config: Config):
+        first_model = model.values(model.selectors[0])
+        
+        # grab the first model - i'm assuming all models will exhibit the same k-band ratio
+        assert "models" in first_model.metadata, "KBandLossAdjustment requires that the model dataset has 'models' metadata containing metadata about the individual component models."
+        k_fluxes = []
+        for k, v in first_model.metadata["models"].items():
+            if 'metadata' not in v:
+                continue
+            v = v['metadata']
+            if "models" not in v:
+                continue
+            for k2, v2 in v["models"].items():
+                if 'metadata' not in v2:
+                    continue
+                v2 = v2['metadata']
+                if "k_band_flux" not in v2:
+                    continue
+                k_fluxes.append(v2["k_band_flux"])
+
+        if len(k_fluxes) != 2:
+            raise ValueError(f"KBandLossAdjustment requires exactly two components to compute the k-band flux ratio, but found {len(k_fluxes)} components.")
+        
+        k_ratio = k_fluxes[1] / k_fluxes[0]
+        
+        k_ratio_resid = self.obs_kband_ratio - k_ratio
+        all_chi2 = np.nansum((k_ratio_resid ** 2 / self.kband_ratio_error ** 2))
+
+        return -0.5 * all_chi2

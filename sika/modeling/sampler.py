@@ -3,7 +3,7 @@ from os import makedirs
 from os.path import join, exists
 import pickle
 import logging
-from typing import List, Union, Optional, Dict, TypeVar, Generic, Tuple
+from typing import List, Union, Optional, Dict, TypeVar, Generic, Tuple, Callable
 import numpy as np 
 import dynesty.plotting as dyplot
 from dynesty import NestedSampler
@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 
 from sika.task import Task
-from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintViolation, AuxiliaryParameterSet
+from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintViolation, AuxiliaryParameterSet, PriorTransform
 
 # this is required or pickling of things like lambdas will not work
 import dill
@@ -22,6 +22,7 @@ import dynesty.utils
 dynesty.utils.pickle_module = dill
 logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
 
+from sika.config import Config
 from sika.utils import NodeSpec, NodeShape, save_bestfit_dict, savefig, plot_corner, get_mpi_info, get_process_info
 from sika.product import Product
 
@@ -66,6 +67,7 @@ class Sampler(Generic[D,M], Task, ABC):
         self.sampler = None
         self.restore_from = restore_from
         self._data_params = data_params if data_params else {}
+        self.loss_adjustments = []
         if isinstance(data, Dataset):
             self.data = data
             self.data_provider = None
@@ -104,6 +106,7 @@ class Sampler(Generic[D,M], Task, ABC):
         args["data_provider"] = self.data_provider
         args["models"] = self.models
         args["loss"] = self.loss
+        args["loss_adjustments"] = [description for _,description in self.loss_adjustments]
         args["data_params"] = self._data_params
         args["restore_from"] = self.restore_from
         args["constraints"] = self.constraints
@@ -139,6 +142,7 @@ class Sampler(Generic[D,M], Task, ABC):
         """ Make a combined model from the flattened parameters and return it. """
         # divvy up the homogenous array of parameters and set the param values of each model
         self.set_model_params(parameters)
+        
         # raises on failure, which is then caught in iterate
         for constraint in self.constraints:
             constraint.validate(raise_on_invalid=True)
@@ -167,17 +171,19 @@ class Sampler(Generic[D,M], Task, ABC):
         Make a combined model spectrum from the parameters and calculate the loss.
         This function is repeatedly called by the sampler during fitting.
         """
-        
         try:
             modeled_ds = self.make_model(parameters)
         except ConstraintViolation as e:
             self.write_out(f"Constraint(s) violated for parameters {parameters}: {e}. Returning -np.inf")
             return -np.inf
-        
         errors, residuals = self.get_errors_and_residuals(modeled_ds)
-
         loss = self.loss(errors, residuals)
-        if np.isnan(loss) or np.isinf(loss) or np.isneginf(loss):
+        # (loss: float, parameters: List[float], model: Dataset, data: Dataset, config: Config)
+        for adjustment, description in self.loss_adjustments:
+            adj_value = adjustment(loss, parameters, modeled_ds, errors, residuals, self.data, self.config)
+            loss += adj_value
+            # self.write_out(f"Applied loss adjustment '{description}': {adj_value}, new loss: {loss}", level=logging.DEBUG)
+        if np.isnan(loss) or np.isinf(loss):
             self.write_out(f"WARNING: loss is {loss} for parameters {parameters}", level=logging.WARNING)
         return loss
 
@@ -200,6 +206,11 @@ class Sampler(Generic[D,M], Task, ABC):
             x[i] = transform(u[i])
             i += 1
         return x
+    
+    def prior_transforms(self) -> List[PriorTransform]:
+        p = [t for m in self.models for t in m.prior_transforms()]
+        p.extend(self.aux_params.get_unfrozen_transforms())
+        return p
     
     def _setup(self):
         """ :meta private: """
@@ -245,6 +256,16 @@ class Sampler(Generic[D,M], Task, ABC):
         with open(join(self.outdir, "model.json"), "w+") as f:
             f.write(self.json())
 
+    def add_loss_adjustment(self, adjustment: Callable[[float, List[float], Dataset, Dataset, np.ndarray, np.ndarray, Config], float], description: str):
+        """Add a callable that takes the current loss, parameters, model, data, and config as input and returns a loss adjustment. Will be called at every iteration of the model and directly added to the loss
+
+        :param adjustment: a callable that takes (loss: float, parameters: List[float], model: Dataset, data: Dataset, errors: np.ndarray, residuals: np.ndarray, config: Config) and returns a float
+        :type adjustment: callable
+        :param description: a short description of the adjustment, used for logging
+        :type description: str
+        """
+        self.loss_adjustments.append((adjustment, description))
+        self.write_out(f"Added loss adjustment: {description}")
 
     def run_sampler(self,pool):
         """:meta private:"""
