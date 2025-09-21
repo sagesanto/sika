@@ -182,7 +182,7 @@ class Sampler(Generic[D,M], Task, ABC):
         for adjustment, description in self.loss_adjustments:
             adj_value = adjustment(loss, parameters, modeled_ds, errors, residuals, self.data, self.config)
             loss += adj_value
-            # self.write_out(f"Applied loss adjustment '{description}': {adj_value}, new loss: {loss}", level=logging.DEBUG)
+            self.write_out(f"Applied loss adjustment '{description}': {adj_value}, new loss: {loss}", level=logging.DEBUG)
         if np.isnan(loss) or np.isinf(loss):
             self.write_out(f"WARNING: loss is {loss} for parameters {parameters}", level=logging.WARNING)
         return loss
