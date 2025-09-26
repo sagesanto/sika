@@ -407,7 +407,7 @@ def get_process_info():
     """
     mem = psutil.Process(os.getpid()).memory_info().rss / 1e9
     pid = os.getpid()
-    return mem, pid
+    return pid, mem
 
 
 def compare_evidence(filename1, filename2):

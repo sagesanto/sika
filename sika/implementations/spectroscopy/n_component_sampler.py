@@ -69,6 +69,7 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             modeled_spectra = [md.values(selector) for md in modeled_datasets]
             wlen, comb_flux, comb_errors, comb_residuals, comb_scale_factors, betas = [], [], [], [], [], []
             orderwise_model_fluxes = []
+            i = 0
             for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen, data_spectrum.flux, data_spectrum.errors):
             # for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen_by_order, data_spectrum.flux_by_order, data_spectrum.error_by_order):
                 assert len(o_wlen) == len(o_flux) == len(o_errors), f"Data wavelength ({len(o_wlen)}), flux ({len(o_flux)}), and error ({len(o_errors)}) arrays must be of the same length within an order"
@@ -87,6 +88,8 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
                     individual_model_fluxes[m.name].append(f)
                 
                 scale_factors, beta = optimize_scale_factors(o_flux, o_errors, model_fluxes)
+                self.write_out(f"order {i} scale factors:", scale_factors)
+                i += 1
                 combined_flux = sum(f * sf for f, sf in zip(model_fluxes, scale_factors))
                 residuals = o_flux - combined_flux  # compute the residuals here instead of later just because its convenient. we'll store them in the metadata and pull them out later
                 wlen.append(o_wlen)

@@ -435,12 +435,12 @@ class Sampler(Generic[D,M], Task, ABC):
         
         if resume:
             outputfiles_basename=self.restore_from
-            if outputfiles_basename.endswith("_"):
-                outputfiles_basename = outputfiles_basename[:-1]
+            if not outputfiles_basename.endswith("_"):
+                outputfiles_basename = outputfiles_basename+"_"
             required_resume_files = [
-                f"{outputfiles_basename}_resume.dat",
-                f"{outputfiles_basename}_phys_live.points",
-                f"{outputfiles_basename}_post_equal_weights.dat",  # optional but often present
+                f"{outputfiles_basename}resume.dat",
+                f"{outputfiles_basename}phys_live.points",
+                f"{outputfiles_basename}post_equal_weights.dat",  # optional but often present
             ]
             if is_main_process:
                 for f in [fname for fname in required_resume_files if not exists(fname)]:
@@ -451,12 +451,14 @@ class Sampler(Generic[D,M], Task, ABC):
                 outputfiles_basename += "_"
         self.outputfiles_basename = outputfiles_basename
         
+        print(kwargs)
         pymn.run(LogLikelihood=self._pymn_iterate, 
                     Prior=self._pymn_prior_transform, 
                     n_dims=self.nparams,
                     use_MPI=use_MPI,
                     init_MPI=False,
                     resume=resume,
+                    dump_callback=print,
                     outputfiles_basename=outputfiles_basename,
                     **kwargs
                 )
