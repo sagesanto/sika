@@ -88,6 +88,12 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
                     individual_model_fluxes[m.name].append(f)
                 
                 scale_factors, beta = optimize_scale_factors(o_flux, o_errors, model_fluxes)
+                if np.any(scale_factors < 0):
+                    self.write_out(f"order {i} negative scale factors found.")
+                    self.write_out("saving self and exiting.")
+                    with open(join(self.outdir,"failed_sampler.pkl"),"wb") as f:
+                        dill.dump(self,f)
+                    raise ValueError("Negative scale factors found. See failed_sampler.pkl for details.")
                 self.write_out(f"order {i} scale factors:", scale_factors)
                 i += 1
                 combined_flux = sum(f * sf for f, sf in zip(model_fluxes, scale_factors))
