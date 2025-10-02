@@ -24,6 +24,7 @@ from sika.utils import savefig
 
 __all__ = ["NComponentSampler", "scale_model_to_order"]
 
+# adapted from jerry xuan
 def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_flux:np.ndarray, filter_type, filter_size) -> np.ndarray:
     # take a model representing the entire spectrum and crop/scale it to a specific order in the data
     # returns the scaled flux array for that order
@@ -66,6 +67,7 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
         spectra = []
         for selector, data_spectrum in self.data:
             individual_model_fluxes = {m.name: [] for m in self.models}
+            individual_model_wlens = {m.name: [] for m in self.models}
             modeled_spectra = [md.values(selector) for md in modeled_datasets]
             wlen, comb_flux, comb_errors, comb_residuals, comb_scale_factors, betas = [], [], [], [], [], []
             orderwise_model_fluxes = []
@@ -86,6 +88,7 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
                 
                 for m, f in zip(self.models, model_fluxes):
                     individual_model_fluxes[m.name].append(f)
+                    individual_model_wlens[m.name].append(o_wlen)
                 
                 scale_factors, beta = optimize_scale_factors(o_flux, o_errors, model_fluxes)
                 # if np.any(scale_factors < 0):
@@ -94,7 +97,7 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
                 #     with open(join(self.outdir,"failed_sampler.pkl"),"wb") as f:
                 #         dill.dump(self,f)
                 #     raise ValueError("Negative scale factors found. See failed_sampler.pkl for details.")
-                self.write_out(f"order {i} scale factors:", scale_factors)
+                # self.write_out(f"order {i} scale factors:", scale_factors)
                 i += 1
                 combined_flux = sum(f * sf for f, sf in zip(model_fluxes, scale_factors))
                 residuals = o_flux - combined_flux  # compute the residuals here instead of later just because its convenient. we'll store them in the metadata and pull them out later
@@ -115,7 +118,8 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
                     "classname":model.__class__.__name__,
                     "dispname":model.display_name,
                     "metadata": spec.metadata,
-                    "flux": individual_model_fluxes[model.name]
+                    "flux": individual_model_fluxes[model.name],
+                    "wlen": individual_model_wlens[model.name],
                 }
             
             s = Spectrum(
