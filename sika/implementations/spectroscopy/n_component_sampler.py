@@ -108,9 +108,9 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
                 comb_scale_factors.append(scale_factors)
                 betas.append(beta)
             
-            param_dict = {model.name: model.parameter_set.sel(selector) for model in self.models}
+            # param_dict = {model.name: model.parameter_set.sel(selector) for model in self.models}
             if np.any(np.concatenate(comb_scale_factors) < 0):
-                self.write_out("negative scale factors:", np.array(comb_scale_factors), "| data selector:", selector, "| parameters:", param_dict)
+                self.write_out("negative scale factors!", np.array(comb_scale_factors), "| data selector:", selector, "| parameters:", self.params)
 
             model_info = {}
             for model, spec in zip(self.models, modeled_spectra):
