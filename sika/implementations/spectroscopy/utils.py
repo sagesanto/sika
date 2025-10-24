@@ -195,6 +195,9 @@ def rot_int_cmj(wlen:np.ndarray, flux:np.ndarray, vsini:float, eps:float=0, nr:i
 
     :returns: flux array, rotationally broadened
     """
+    if vsini == 0 and eps == 0:
+        return flux
+    
     ns = np.copy(flux)*0.0
     tarea = 0.0
     dr=1./nr
@@ -322,9 +325,9 @@ class KBandLossAdjustment:
         self.kband_ratio_error = kband_ratio_error
 
     def __call__(self, loss: float, parameters: List[float], model: Dataset, data: Dataset, errors: np.ndarray, residuals: np.ndarray, config: Config):
+        # grab the first model - i'm assuming all models will exhibit the same k-band ratio
         first_model = model.values(model.selectors[0])
         
-        # grab the first model - i'm assuming all models will exhibit the same k-band ratio
         assert "models" in first_model.metadata, "KBandLossAdjustment requires that the model dataset has 'models' metadata containing metadata about the individual component models."
         k_fluxes = []
         for k, v in first_model.metadata["models"].items():
