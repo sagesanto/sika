@@ -353,3 +353,46 @@ class KBandLossAdjustment:
         all_chi2 = np.nansum((k_ratio_resid ** 2 / self.kband_ratio_error ** 2))
 
         return -0.5 * all_chi2
+
+class SpecificKBandLossAdjustment:
+    """Contributes a penalty term for deviation from the observed k-band flux to the loss of a binary model.
+    Ratio is defined as model_2 / model_1.
+    
+    This is very simple to implement and pretty specific in its expectation of the metadata structure of the model, so it's probably easier to write a new one for your specific use case than to try to conform to this one."""
+    def __init__(self, model_1_name, model_2_name, obs_kband_ratio: float, kband_ratio_error: float):
+        self.obs_kband_ratio = obs_kband_ratio
+        self.model_1_name = model_1_name
+        self.model_2_name = model_2_name
+        self.kband_ratio_error = kband_ratio_error
+
+    def __call__(self, loss: float, parameters: List[float], model: Dataset, data: Dataset, errors: np.ndarray, residuals: np.ndarray, config: Config):
+        # grab the first model - i'm assuming all models will exhibit the same k-band ratio
+        
+        first_model = model.values(model.selectors[0])
+        
+        assert "models" in first_model.metadata, "KBandLossAdjustment requires that the model dataset has 'models' metadata containing metadata about the individual component models."
+        
+        models_meta = first_model.metadata["models"]
+        
+        if self.model_1_name not in first_model.metadata['models']:
+            raise ValueError(f"Couldn't find model '{self.model_1_name}' in model metadata. Known models are: {first_model.metadata['models']}")
+        if self.model_2_name not in first_model.metadata['models']:
+            raise ValueError(f"Couldn't find model '{self.model_2_name}' in model metadata. Known models are: {first_model.metadata['models']}")
+        
+        
+        try: 
+            model_1_kband = models_meta[self.model_1_name]["metadata"]["k_band_flux"]
+        except KeyError:
+            raise ValueError(f"Couldn't find key 'k_band_flux' in metadata of model '{self.model_1_name}'. Model metadata: {models_meta[self.model_1_name]['metadata']}")
+        
+        try:
+            model_2_kband = models_meta[self.model_2_name]["metadata"]["k_band_flux"]
+        except KeyError:
+            raise ValueError(f"Couldn't find key 'k_band_flux' in metadata of model '{self.model_2_name}'. Model metadata: {models_meta[self.model_2_name]['metadata']}")
+        
+        k_ratio = model_2_kband / model_1_kband
+                
+        k_ratio_resid = self.obs_kband_ratio - k_ratio
+        all_chi2 = np.nansum((k_ratio_resid ** 2 / self.kband_ratio_error ** 2))
+
+        return -0.5 * all_chi2
