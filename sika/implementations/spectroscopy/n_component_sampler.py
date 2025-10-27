@@ -250,7 +250,7 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
                 model_spectrum = self.best_models.values(selector)
                 for order in range(data_spectrum.norders):
                     plot_crires_model(model_spectrum, data_spectrum, order, selector)
-                    savefig(f"best_o{order}_{selector}.png", config=self.config, outdir=self.outdir)
+                    savefig(f"best_o{order}_{selector}.png".replace("{",'').replace("}",'').replace('\'','').replace(": ","_"), config=self.config, outdir=self.outdir)
                     plt.close()
         except Exception as e:
             self.write_out('Order-by-order best fit plots failed',level=logging.WARNING)
