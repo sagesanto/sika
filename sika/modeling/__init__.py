@@ -1,10 +1,10 @@
 # __all__ = ["Parameter", "ParameterSet", "PriorTransform", "Model", "Dataset", "Loss", "DataLoader", "Uniform", "Normal", "NullPriorTransform", "ProviderDataLoader", "LnLikelihood"]
 
 from .priors import Normal, NullPriorTransform, PriorTransform, Uniform
-from .constraint import BaseConstraint, Constraint, ListConstraint, ConstraintViolation
+from .constraint import BaseConstraint, Constraint, ListConstraint, ConstraintViolation, ConstraintError
 from .params import Parameter, RelativeParameter, DeltaParameter, UnitRelativeParameter, joint_iter
 from .parameter_set import ParameterSet, EmptyParameterSet, AuxiliaryParameterSet
 from .models import Model, CompositeModel
 from .data import Dataset, DataLoader #, ProviderDataLoader
-from .loss import Loss, LnLikelihood
+from .loss import Loss, LnLikelihood, LnLikelihoodErrPenalty
 from .sampler import Sampler

@@ -458,7 +458,6 @@ class Sampler(Generic[D,M], Task, ABC):
                     use_MPI=use_MPI,
                     init_MPI=False,
                     resume=resume,
-                    dump_callback=print,
                     outputfiles_basename=outputfiles_basename,
                     **kwargs
                 )
