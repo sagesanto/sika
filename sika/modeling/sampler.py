@@ -21,6 +21,7 @@ import dill
 import dynesty.utils
 dynesty.utils.pickle_module = dill
 logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
+logging.getLogger('PIL').setLevel(logging.WARNING)  # suppress buggy tk PIL output
 
 from sika.config import Config
 from sika.utils import NodeSpec, NodeShape, save_bestfit_dict, savefig, plot_corner, get_mpi_info, get_process_info
