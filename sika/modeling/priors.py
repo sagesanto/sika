@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from scipy.stats import norm, truncnorm
+from scipy.stats import norm, truncnorm, uniform
 from typing import Any, Dict, Tuple, Optional
+import numpy as np
 
 __all__ = ["PriorTransform", "NullPriorTransform", "Uniform", "Normal"]
 
@@ -31,6 +32,12 @@ class PriorTransform(ABC):
         Convert the prior transform to a dictionary representation
         This needs to be overridden in subclasses. 
         """
+        
+    @abstractmethod
+    def empirical_pdf(self) -> np.ndarray:
+        """
+        Return a 2xN array of points that can be plotted for a grapical representation of this prior's pdf
+        """
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -39,6 +46,15 @@ class PriorTransform(ABC):
         d = self._to_dict()
         d["class"] = self.__class__.__name__
         return d
+    
+    def plot(self,ax,**kwargs):
+        x,y = self.empirical_pdf()
+        ax.plot(x,y,**kwargs)
+
+    @property
+    @abstractmethod
+    def dispname(self) -> str:
+        """Return a display name for the distribution. Can use LaTex."""
 
     # @abstractmethod
     # def log_prior(self, value: float) -> float:
@@ -59,6 +75,12 @@ class NullPriorTransform(PriorTransform):
     def _to_dict(self):
         return {}
     
+    def empirical_pdf(self):
+        raise NotImplementedError("NullPriorTransform does not implement empirical_pdf")
+    
+    def dispname(self):
+        raise NotImplementedError("NullPriorTransform does not implement dispname")
+    
     # def log_prior(self, value: float) -> float:
     #     raise NotImplementedError("NullPriorTransform does not implement log_prior")
 
@@ -76,10 +98,12 @@ class Uniform(PriorTransform):
         """
         self.min_val = min_val
         self.max_val = max_val
+        self.distr = uniform(min_val,max_val-min_val)
         super().__init__()
 
     def _call(self, var: float) -> float:
-        return self.min_val + var * (self.max_val - self.min_val)
+        return self.distr.ppf(var)
+        # return self.min_val + var * (self.max_val - self.min_val)
 
     def __repr__(self) -> str:
         return f"Uniform(min_val={self.min_val}, max_val={self.max_val})"
@@ -89,6 +113,14 @@ class Uniform(PriorTransform):
             "min_val": self.min_val,
             "max_val": self.max_val,
         }
+        
+    def dispname(self):
+        return "\mathcal{U}"+f"({self.min_val:.2f},{self.max_val:.2f})"
+        
+    def empirical_pdf(self) -> np.ndarray:
+        x = np.linspace(self.min_val, self.max_val,num=1000)
+        y = self.distr.pdf(x)
+        return np.c_[x,y].T
         
     # def log_prior(self, value: float) -> float:
     #     return 
@@ -125,6 +157,17 @@ class Normal(PriorTransform):
             "mean": self.mean,
             "bounds": self.bounds,
         }
+
+    def empirical_pdf(self) -> np.ndarray:
+        x_lower, x_upper = self.distr.interval(0.99)
+        x = np.linspace(x_lower, x_upper,num=1000)
+        y = self.distr.pdf(x)
+        return np.c_[x,y].T
+    
+    def dispname(self):
+        if self.bounds is not None:
+            return "\mathcal{N}"+f"({self.mean:.2f},{self.std:.2f}, {self.bounds[0]:.2f},{self.bounds[1]:.2f})"
+        return "\mathcal{N}"+f"({self.mean:.2f},{self.std:.2f})"
 
     def _call(self,var:float) -> float:
         return self.distr.ppf(var)
