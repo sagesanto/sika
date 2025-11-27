@@ -170,6 +170,19 @@ class ParameterSet:
             names[i] = f"{self.name}: {name}"
         return names
     
+    def short_names(self, unfrozen_only=True) -> List[str]:
+        """ Return a list of parameter names, not including coordinate variants. """
+        if unfrozen_only:
+            pset = self.unfrozen
+        else:
+            pset = self.params
+        names = []
+        for p in pset:
+            names.append(p.name)
+        for i, name in enumerate(names):
+            names[i] = f"{self.name}: {name}"
+        return names
+    
 
 def joint_iter(*param_sets: ParameterSet):
     for (x) in joint_iter_generic(*[p.as_xarray() for p in param_sets]):

@@ -57,7 +57,7 @@ def download_PHOENIX_stellar_model(teff, logg, url='https://phoenix.astro.physik
     return f
 
 
-class Phoenix(Provider):
+class Phoenix(Provider[Spectrum]):
     def _setup(self):
         self.url = self.config["phoenix"]["url"]
         self.model_dir = self.config["phoenix"]["model_dir"]

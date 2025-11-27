@@ -246,12 +246,17 @@ class KPICDataLoader(DataLoader[KPICSpectrum]):
                 response_file = join(data_dir, data_cfg[n]["response_file"])
             else:
                 response_file = None
+            exposure_num_cfg = merged_cfg[n]["exposures"]
             for fiber in merged_cfg["fibers"]:
+                exposures = exposure_num_cfg.get(fiber)
+                if exposures is None:
+                    raise ValueError(f"Tried to load data for {target_name} fiber '{fiber}' (night {n}) but no exposures for that fiber were specified in the {target_name}.data.{n}.exposures config section.")
+                
                 self.write_out(f"Loading data for target {target_name} from night {n}, fiber {fiber} in directory {data_dir}. is_star: {is_star}")
                 s = load_kpic_spectrum(
                     data_dir, 
                     calib_dir, 
-                    exposures=merged_cfg[n]["exposures"],
+                    exposures=exposures,
                     fiber=fiber,
                     is_star=is_star,
                     filter_size=filter_size, 

@@ -93,7 +93,7 @@ class KPICSpectrum(Spectrum):
             error_by_order.append(error_order)
             # trace_sigma_by_order.append(trace_sigma_order)
             del_masks.append(del_mask)
-                
+        self.norders = len(flux_by_order)
         self.del_masks = np.array(del_masks)
         self.flux = flux_by_order
         self.wlen = wlen_by_order

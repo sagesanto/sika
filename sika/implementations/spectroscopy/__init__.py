@@ -1,4 +1,4 @@
-from .grid_companion_model import CompanionParameterSet, GridCompanionModel, PhoenixCompanionParameterSet, ElfOwlCompanionParameterSet
+from .grid_companion_model import CompanionParameterSet, GridCompanionModel, PhoenixCompanionParameterSet, ElfOwlCompanionParameterSet, BTSettlCompanionParameterSet
 from .spectra.spectrum import Spectrum
 from .atmospheres import PMMRModel, PTModel, ElfOwl, CommonLogPressureGrid, CommonPressureGrid, ProfileVisualization
 from .pRT import pRT
@@ -14,3 +14,4 @@ from .crires.crires_loader import CRIRESDataLoader, load_crires_spectrum
 from .crires.empirical_crires_model import EmpiricalCRIRESModel
 
 from .phoenix import Phoenix, download_PHOENIX_stellar_model
+from .BTSettl import BTSettl

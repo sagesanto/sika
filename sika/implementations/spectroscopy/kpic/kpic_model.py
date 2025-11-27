@@ -11,14 +11,14 @@ from .kpic_spectrum import KPICSpectrum
 
 
 def model_to_kpic_grid(model:Spectrum, kpic_spec: KPICSpectrum):
-        convolved_fluxes = []
-        for i in range(len(kpic_spec.orig_wlen)):
-            convolved_fluxes.append(convolve_and_sample(np.array(kpic_spec.orig_wlen[i]),np.array(kpic_spec.trace_sigmas[i]),np.array(model.wlen), np.array(model.flux)))
-        model.flux = np.array(convolved_fluxes).flatten()
-        model.wlen = np.array(kpic_spec.orig_wlen).flatten()
-        
-        model.metadata["aligned_to_kpic"] = True
-        return model
+    convolved_fluxes = []
+    for i in range(len(kpic_spec.orig_wlen)):
+        convolved_fluxes.append(convolve_and_sample(np.array(kpic_spec.orig_wlen[i]),np.array(kpic_spec.trace_sigmas[i]),np.array(model.wlen), np.array(model.flux)))
+    model.flux = np.array(convolved_fluxes).flatten()
+    model.wlen = np.array(kpic_spec.orig_wlen).flatten()
+    
+    model.metadata["aligned_to_kpic"] = True
+    return model
 
 def apply_kpic_response(model:Spectrum, kpic_spec: KPICSpectrum):
     if kpic_spec.response_flux is None:
@@ -44,6 +44,12 @@ class DataWrapper(Provider[Dataset[D]]):
         elif self.data_provider:
             return self.data_provider(parameters)
         raise ValueError("No data available")
+    
+    @property
+    def provided_parameters(self):
+        if self.data_provider:
+            return self.data_provider.provided_parameters
+        return {}
 
 class KPICModel(CompositeModel[Spectrum]):
     def __init__(self,spectral_model: Model[Spectrum], kpic_data: Dataset[D] | DataLoader[D], *args, data_params={}, **kwargs):

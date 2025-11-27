@@ -16,13 +16,16 @@ For each target:
     primary = {primary_name}
     [{target_name}.data]
         [{target_name}.data.{night}]
-            exposures = ['{exposure}', '{exposure}', ...]
             fibers = ['{fiber}', '{fiber}', ...]
+            [{target_name}.data.{night}.exposures]
+                {fiber} = ['{exposure}', '{exposure}', ...]
+                {fiber} = ['{exposure}', '{exposure}', ...]
+                ...
 ```
 
 Where:
 - `{target_name}` is the name of a target (ex. `Gl229B`)
-- `{primary_name}` (optional) is the name of the star, with a config of the same format. 
+- `{primary_name}` (optional) is the name of the host star, with a config of the same format. 
 - `{night}` is the name of an observing night in the format `YYYYMMDD` (ex. `20250616`)
 - `{exposure}` is a number (ex. `0164`) that corresponds to a frame that should be included in the processing, where the same identifier appears in the exposure fits filenames (see below)
 - `{fiber}` is the name of a fiber that should be included, ex. `SF1`

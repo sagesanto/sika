@@ -3,7 +3,7 @@ from os import makedirs
 from os.path import join, exists
 import pickle
 import logging
-from typing import List, Union, Optional, Dict, TypeVar, Generic, Tuple, Callable
+from typing import List, Union, Optional, Dict, TypeVar, Generic, Tuple, TypeVarTuple
 import numpy as np 
 import dynesty.plotting as dyplot
 from dynesty import NestedSampler
@@ -14,29 +14,29 @@ from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 
 from sika.task import Task
-from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintViolation, AuxiliaryParameterSet, PriorTransform, ParameterSet
+from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintViolation, AuxiliaryParameterSet, PriorTransform
 
 # this is required or pickling of things like lambdas will not work
 import dill
 import dynesty.utils
 dynesty.utils.pickle_module = dill
 logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
-logging.getLogger('PIL').setLevel(logging.WARNING)  # suppress buggy tk PIL output
 
-from sika.config import Config
 from sika.utils import NodeSpec, NodeShape, save_bestfit_dict, savefig, plot_corner, get_mpi_info, get_process_info
 from sika.product import Product
 
-__all__ = ["Sampler"]
+
+from .sampler import Sampler
+
 
 D = TypeVar('D', bound=Product, covariant=True)  # type of the data Product
 M = TypeVar('M', bound=Product, covariant=True)  # type of the model Product
-class Sampler(Generic[D,M], Task, ABC):
+class JointSampler(Task, ABC):
     """ Base class for samplers that fit models to data using a likelihood function. """
     
     supported_samplers = ['dynesty', "pymultinest"]
 
-    def __init__(self, run_prefix:str, outdir, data: Union[Dataset[D], DataLoader[D]], models: List[Model[M]], *args, loss=LnLikelihood(), data_params: Optional[Dict] = None, restore_from: Optional[str]=None, constraints: Optional[List[Constraint]]=None, aux_params:Optional[AuxiliaryParameterSet]=None, **kwargs):
+    def __init__(self, run_prefix:str, outdir, samplers: List[Sampler], *args, loss=LnLikelihood(), restore_from: Optional[str]=None, **kwargs):
         """Initialize the Sampler.
 
         :param run_prefix: a name for the run, used to name output files
@@ -57,57 +57,23 @@ class Sampler(Generic[D,M], Task, ABC):
         :type constraints: Optional[List[Constraint]], optional
         """
         super().__init__(*args, **kwargs)
-        if aux_params is None:
-            aux_params = AuxiliaryParameterSet()
-        self.aux_params = aux_params
         self.outdir = outdir
         self.run_prefix = run_prefix
         makedirs(outdir, exist_ok=True)
-        self.models = models
+        self.samplers = samplers
         self.loss = loss
         self.sampler = None
         self.restore_from = restore_from
-        self._data_params = data_params if data_params else {}
-        self.loss_adjustments = []
-        if isinstance(data, Dataset):
-            self.data = data
-            self.data_provider = None
-        else:  # assume it's a DataLoader, will call later
-            self.data_provider = data
-            self.data: Dataset[D] = None
-        self.constraints = constraints if constraints is not None else []
 
-        self.params = [p for model in models for p in model.params] + self.aux_params.unfrozen
-        
+        self.params = [p for sampler in samplers for p in sampler.params]
+
     @property
     def previous(self):
-        if self.data_provider is not None:
-            return self.models + [self.data_provider]
-        return self.models
+        return self.samplers
         
     @property
     def param_names(self):
-        n = []
-        for model in self.models:
-            n.extend(model.param_names)
-        n.extend(self.aux_params.all_names())
-        return n
-    
-    @property
-    def short_param_names(self):
-        n = []
-        for model in self.models:
-            n.extend(model.short_param_names)
-        n.extend(self.aux_params.short_names())
-        return n
-    
-    @property
-    def parameter_sets(self) -> List[ParameterSet]:
-        psets = []
-        for m in self.models:
-            psets.extend(m.parameter_sets)
-        psets += [self.aux_params]
-        return psets
+        return [n for s in self.samplers for n in s.param_names()]
         
     def node_spec(self) -> NodeSpec:
         return NodeSpec(
@@ -119,15 +85,11 @@ class Sampler(Generic[D,M], Task, ABC):
         
     def args_to_dict(self):
         args = {}
+        args["run_prefix"] = self.run_prefix
         args["outdir"] = self.outdir
-        args["data_provider"] = self.data_provider
-        args["models"] = self.models
+        args["samplers"] = self.samplers
         args["loss"] = self.loss
-        args["loss_adjustments"] = [description for _,description in self.loss_adjustments]
-        args["data_params"] = self._data_params
         args["restore_from"] = self.restore_from
-        args["constraints"] = self.constraints
-        args["aux_params"] = self.aux_params
         return args
         
     # def configure(self, config:Union[None,Config], logger: Union[None,Logger]):
@@ -147,62 +109,43 @@ class Sampler(Generic[D,M], Task, ABC):
             grouped_params.append(params)
         return grouped_params
     
-    def set_model_params(self,parameters:List[float]):
-        """ :meta private: """
+    def make_models(self, parameters: List[float]) -> List[Dataset]:
         grouped_params = self._group_params(parameters)
-        aux_params = grouped_params.pop()
-        for params, model in zip(grouped_params, self.models):
-            model.set_params(params)
-        self.aux_params.set_values_flat(np.array(aux_params))
-    
-    def make_model(self,parameters:List[float]) -> Dataset[M]:
-        """ Make a combined model from the flattened parameters and return it. """
-        # divvy up the homogenous array of parameters and set the param values of each model
-        self.set_model_params(parameters)
-        
-        # raises on failure, which is then caught in iterate
-        for constraint in self.constraints:
-            constraint.validate(raise_on_invalid=True)
-        return self._make_model()
-    
-    @abstractmethod
-    def _make_model(self) -> Dataset[M]:
-        """Make the combined model for evaluation using the Sampler's models, whose parameters have **already been set** 
+        models = []
+        for params, sampler in zip(grouped_params, self.samplers):
+            models.append(sampler.make_model(params))
+        return models
 
-        :return: the model to be compared to the data
-        :rtype: Dataset[M]
-        """
+    # def set_model_params(self,parameters:List[float]):
+    #     """ :meta private: """
+    #     grouped_params = self._group_params(parameters)
+    #     aux_params = grouped_params.pop()
+    #     for params, model in zip(grouped_params, self.models):
+    #         model.set_params(params)
+    #     self.aux_params.set_values_flat(np.array(aux_params))
     
-    @abstractmethod
-    def get_errors_and_residuals(self, modeled_ds: Dataset[M]) -> Tuple[np.ndarray, np.ndarray]:
-        """Take the just-created Dataset of modeled products ``modeled_ds`` and return errors and residuals (presumably by comparing modeled_ds and self.data) for use in the log likelihood calculation 
-
-        :param modeled_ds: the just-created Dataset of models to evaluate 
-        :type modeled_ds: Dataset[M]
-        :return: errors, residuals, each a 1d np array
-        :rtype: np.ndarray, np.ndarray
-        """
+    # def make_model(self,parameters:List[float]) -> Dataset[M]:
+    #     """ Make a combined model from the flattened parameters and return it. """
+    #     # divvy up the homogenous array of parameters and set the param values of each model
+    #     self.set_model_params(parameters)
+    #     # raises on failure, which is then caught in iterate
+    #     for constraint in self.constraints:
+    #         constraint.validate(raise_on_invalid=True)
+    #     return self._make_model()
     
     def iterate(self, parameters: List[float]) -> float:
         """
         Make a combined model spectrum from the parameters and calculate the loss.
         This function is repeatedly called by the sampler during fitting.
         """
-        try:
-            modeled_ds = self.make_model(parameters)
-        except ConstraintViolation as e:
-            self.write_out(f"Constraint(s) violated for parameters {parameters}: {e}. Returning -np.inf")
-            return -np.inf
-        errors, residuals = self.get_errors_and_residuals(modeled_ds)
-        loss = self.loss(errors, residuals)
-        # (loss: float, parameters: List[float], model: Dataset, data: Dataset, config: Config)
-        for adjustment, description in self.loss_adjustments:
-            adj_value = adjustment(loss, parameters, modeled_ds, errors, residuals, self.data, self.config)
-            loss += adj_value
-            self.write_out(f"Applied loss adjustment '{description}': {adj_value}, new loss: {loss}", level=logging.DEBUG)
-        if np.isnan(loss) or np.isinf(loss):
-            self.write_out(f"WARNING: loss is {loss} for parameters {parameters}", level=logging.WARNING)
-        return loss
+        grouped_params = self._group_params(parameters)
+        loss_terms = []
+        for params, sampler in zip(grouped_params, self.samplers):
+            loss_terms.append(sampler.iterate(params))
+        total_loss = sum(loss_terms)
+        if np.isnan(total_loss):
+            self.write_out(f"WARNING: total loss is {total_loss} for parameters {parameters}", level=logging.WARNING)
+        return total_loss
 
     def prior_transform(self, u:np.ndarray) -> np.ndarray:
         """Transform an array of unit cube variables to the parameter-space by applying each parameter's prior transform.
@@ -212,22 +155,13 @@ class Sampler(Generic[D,M], Task, ABC):
         :return: the live points, transformed to parameter-space
         :rtype: np.ndarray
         """
-        
         x = np.copy(u)
         i = 0
-        for m in self.models:
-            for transform in m.prior_transforms():
+        for s in self.samplers:
+            for transform in s.prior_transforms():
                 x[i] = transform(u[i])
                 i += 1
-        for transform in self.aux_params.get_unfrozen_transforms():
-            x[i] = transform(u[i])
-            i += 1
         return x
-    
-    def prior_transforms(self) -> List[PriorTransform]:
-        p = [t for m in self.models for t in m.prior_transforms()]
-        p.extend(self.aux_params.get_unfrozen_transforms())
-        return p
     
     def _setup(self):
         """ :meta private: """
@@ -236,53 +170,17 @@ class Sampler(Generic[D,M], Task, ABC):
         self.sampler_type = self.target_cfg["sampler_type"]
         if self.sampler_type not in self.supported_samplers:
             raise ValueError(f"Sampler type {self.sampler_type} not supported. Supported samplers: {self.supported_samplers}")
-        
-        if self.data_provider is not None: # we were passed a DataLoader instead of a dataset
-            self.write_out("Loading data from provider...")
-            self.data = self.data_provider(
-                self._data_params
-            )  # get the data that we are fitting to
-            self.write_out("Loaded data.")
-        data_coords = self.data.coords
-        self.write_out("Setting up models with data coordinates:", data_coords)
-        for model in self.models:
-            model.set_coords(
-                data_coords
-            )  # inform the model of the data coordinates (will inform parameters)
-        self.aux_params.set_coords(data_coords)
-        self.nparams_per = [model.nvals for model in self.models] + [self.aux_params.nvals]
-        self.write_out("Number of parameters per model:", self.nparams_per[:-1])
-        self.write_out("Number of auxiliary parameters:", self.nparams_per[-1])
-        self.nparams = sum(self.nparams_per)
-        self.write_out("Model setup complete.")
-        if self.data.coords:
-            self.write_out("Model coordinates:")
-            for m in self.models:
-                self.write_out(f"  {m.name}: ")
-                for k, v in m.coords.items():
-                    self.write_out(f"    {k}: {v}")
-            self.write_out("Model shapes:")
-            for m in self.models:
-                self.write_out(f"  {m.name}: ")
-                self.write_out(m.explain_shape())
 
-        self.write_out("Parameters per model:", self.nparams_per)
+        self.nparams_per = [sampler.nparams for sampler in self.samplers]
+        self.nparams = sum(self.nparams_per)
+        self.write_out("Joint Sampler setup complete.")
+
+        self.write_out("Parameters per sampler:", self.nparams_per)
         self.write_out("Total number of parameters:", self.nparams)
         
         self.write_out("Writing model architecture to file...")
-        with open(join(self.outdir, "model.json"), "w+") as f:
+        with open(join(self.outdir, "joint_fitter.json"), "w+") as f:
             f.write(self.json())
-
-    def add_loss_adjustment(self, adjustment: Callable[[float, List[float], Dataset, Dataset, np.ndarray, np.ndarray, Config], float], description: str):
-        """Add a callable that takes the current loss, parameters, model, data, and config as input and returns a loss adjustment. Will be called at every iteration of the model and directly added to the loss
-
-        :param adjustment: a callable that takes (loss: float, parameters: List[float], model: Dataset, data: Dataset, errors: np.ndarray, residuals: np.ndarray, config: Config) and returns a float
-        :type adjustment: callable
-        :param description: a short description of the adjustment, used for logging
-        :type description: str
-        """
-        self.loss_adjustments.append((adjustment, description))
-        self.write_out(f"Added loss adjustment: {description}")
 
     def run_sampler(self,pool):
         """:meta private:"""
@@ -299,7 +197,9 @@ class Sampler(Generic[D,M], Task, ABC):
         self.visualize_results()
             
         # self.logprob_chain, self.plot_chain, self.max_params
-        return self.res, self.best_fit_dict, self.best_models   
+        return self.res, self.best_fit_dict, self.best_models
+    
+    ########## Needs work from here on ##########
     
     def save_results(self): 
         """:meta private:"""
@@ -452,12 +352,12 @@ class Sampler(Generic[D,M], Task, ABC):
         
         if resume:
             outputfiles_basename=self.restore_from
-            if not outputfiles_basename.endswith("_"):
-                outputfiles_basename = outputfiles_basename+"_"
+            if outputfiles_basename.endswith("_"):
+                outputfiles_basename = outputfiles_basename[:-1]
             required_resume_files = [
-                f"{outputfiles_basename}resume.dat",
-                f"{outputfiles_basename}phys_live.points",
-                f"{outputfiles_basename}post_equal_weights.dat",  # optional but often present
+                f"{outputfiles_basename}_resume.dat",
+                f"{outputfiles_basename}_phys_live.points",
+                f"{outputfiles_basename}_post_equal_weights.dat",  # optional but often present
             ]
             if is_main_process:
                 for f in [fname for fname in required_resume_files if not exists(fname)]:
@@ -468,7 +368,6 @@ class Sampler(Generic[D,M], Task, ABC):
                 outputfiles_basename += "_"
         self.outputfiles_basename = outputfiles_basename
         
-        print(kwargs)
         pymn.run(LogLikelihood=self._pymn_iterate, 
                     Prior=self._pymn_prior_transform, 
                     n_dims=self.nparams,

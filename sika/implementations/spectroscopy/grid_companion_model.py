@@ -51,6 +51,17 @@ class PhoenixCompanionParameterSet(CompanionParameterSet):
     ):
         super().__init__(name, rv, vsini, teff=teff, logg=logg)
 
+class BTSettlCompanionParameterSet(CompanionParameterSet):
+    def __init__(
+        self,
+        name: str,
+        rv: Union[PriorTransform, Parameter],
+        vsini: Union[PriorTransform, Parameter],
+        teff: Union[PriorTransform, Parameter],
+        logg: Union[PriorTransform, Parameter],
+        mh: Union[PriorTransform, Parameter]
+    ):
+        super().__init__(name, rv, vsini, teff=teff, logg=logg,mh=mh)
 
 
 class GridCompanionModel(Model[Spectrum]):
@@ -65,7 +76,6 @@ class GridCompanionModel(Model[Spectrum]):
     ):
         super().__init__(parameter_set, *args, **kwargs)
         self.spectra_provider = spectra_provider
-        self.spectra_keys = list(self.spectra_provider.provided_parameters.keys())
 
     @property
     def previous(self):
@@ -76,6 +86,7 @@ class GridCompanionModel(Model[Spectrum]):
     #     self.spectra_provider.configure(config, logger)
 
     def _setup(self):
+        self.spectra_keys = list(self.spectra_provider.provided_parameters.keys())
         self.model_specific_config = self.config[self.config["target"]].get(
             "grid_companion_model", {}
         )

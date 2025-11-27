@@ -13,11 +13,11 @@ class SpectralGridInterpolator(ContinuousProvider[Spectrum], IntermediateTask[Pr
     """ Interpolates between spectral models on a grid of parameters. """
     
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
         self._keys = None  # establish key order for parameters for later interpolation
         self._grid_interp = None
         self.wlen = None
         self._param_product = None
+        super().__init__(*args, **kwargs)
     
     def args_to_dict(self):
         return {}
@@ -35,12 +35,16 @@ class SpectralGridInterpolator(ContinuousProvider[Spectrum], IntermediateTask[Pr
         vals = [self.prev.provided_parameters[k] for k in self._keys]
         self._param_product = list(product(*vals))
         fluxes = []
+        d = {}
         for params in self._param_product:
             spectrum = self.prev(dict(zip(self._keys, params)))
             if self.wlen is None:
                 self.wlen = spectrum.wlen
             fluxes.append(spectrum.flux)
-            
+            d[spectrum.flux.shape[0]] = params
+        if len(np.unique([f.shape for f in fluxes])) > 1:
+            self.write_out("Oh no! Some parameters get flux arrays with different lengths!",level=logging.ERROR)
+            self.write_out(f"Here are some parameter values that produce different-length arrays: {d}",level=logging.ERROR)
         fluxes = np.array(fluxes)
         fluxes = fluxes.reshape(*[len(p) for p in vals], -1)  # ensure shape is correct
         self.write_out("Spectral grid flux shape:",fluxes.shape,level=logging.DEBUG)

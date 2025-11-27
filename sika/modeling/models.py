@@ -81,6 +81,11 @@ class Model(Generic[T], Task, ABC):
         return self.parameter_set.all_names(unfrozen_only=True)
     
     @property
+    def short_param_names(self) -> List[str]:
+        """ Like param_names, but only returns short name of parameter (does not include coordinate variants)"""
+        return self.parameter_set.short_names(unfrozen_only=True)
+
+    @property
     def coord_shape(self) -> Tuple[int,...]:
         """
         Return the shape of the coordinates in the parameter set.
@@ -96,6 +101,11 @@ class Model(Generic[T], Task, ABC):
     
     def set_params(self, parameters: List[float]):
         self.parameter_set.set_values_flat(parameters)
+    
+    @property
+    def parameter_sets(self):
+        """ Silly recursion base-case """
+        return [self.parameter_set]
     
     def __call__(self, parameters: List[float]) -> Dataset[T]:
         self.set_params(parameters)
@@ -170,6 +180,17 @@ class CompositeModel(Model[T]):
     @property
     def param_names(self) -> List[str]:
         return self.parameter_set.all_names(unfrozen_only=True) + [n for m in self.models for n in m.param_names]
+    
+    @property
+    def parameter_sets(self) -> List[ParameterSet]:
+        psets = [self.parameter_set]
+        for m in self.models:
+            psets.extend(m.parameter_sets)
+        return psets
+
+    @property
+    def short_param_names(self) -> List[str]:
+        return self.parameter_set.short_names(unfrozen_only=True) + [n for m in self.models for n in m.short_param_names]
     
     def explain_shape(self) -> str:
         s = f"{self.name} shape is determined by the parameters in the parameter set and the composite models.\n"
