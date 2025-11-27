@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from .crires.crires_spectrum import CRIRESSpectrum
 from .crires.plotting import plot_crires_model
 from sika.implementations.spectroscopy.utils import optimize_scale_factors
-
+from sika.modeling.parameter_set import joint_iter as joint_iter_paramset
 from .spectra.spectrum import Spectrum
 from sika.modeling import Sampler, Dataset
 
@@ -109,8 +109,8 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
                 betas.append(beta)
             
             # param_dict = {model.name: model.parameter_set.sel(selector) for model in self.models}
-            if np.any(np.concatenate(comb_scale_factors) < 0):
-                self.write_out("negative scale factors!", np.array(comb_scale_factors), "| data selector:", selector, "| parameters:", self.params)
+            if np.any(np.concatenate(comb_scale_factors) == 0):
+                self.write_out("scale factors of zero!", np.array(comb_scale_factors), "| data selector:", selector, "| parameters:", self.params)
 
             model_info = {}
             for model, spec in zip(self.models, modeled_spectra):
@@ -172,25 +172,26 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
         super().save_results()
         
         try:
-            nights = self.best_models.coords["night"]
+            uncert2 = {}
+            for k, (val, uncerts) in self.param_w_uncert.items():
+                uncert2[k] = dill.dumps(([val]+list(uncerts)))
             rows = []
-
-            for n in nights:
-                row = {"night":n}
-                for k, v in self.param_w_uncert.items():
-                    if "rv" in k and n not in k:
-                        continue
-                    pname = k.split(" (night=")[0].replace(": ","_")
-                    val, (val_plus, val_minus,val_std) = v
-                    
+            self.set_model_params(list(uncert2.values()))
+            for sel, pval in joint_iter_paramset(*self.params):
+                row = sel
+                pval = [dill.loads(p) for p in pval]
+                for pname, v in zip(self.short_param_names, pval):
+                    val, val_plus, val_minus,val_std = v     
                     row[pname] = val
                     row[pname+"_plus"] = val_plus
                     row[pname+"_minus"] = val_minus
                     row[pname+"_std"] = val_std
                 rows.append(row)
-            
             df = pd.DataFrame(rows)
-            df = df.sort_values("night")
+            try:
+                df = df.sort_values("night")
+            except:
+                pass
             df.to_csv(join(self.outdir,"best_params.csv"),index=None)
         except Exception as e:
             self.write_out(f"Error saving best_params.csv: {e}. continuing anyway", level=logging.ERROR)

@@ -316,11 +316,19 @@ class Sampler(Generic[D,M], Task, ABC):
             pickle.dump(self.plot_chain, f)
         self.write_out(f"Wrote plot chain to {plot_chain_outpath}")
         
+        try:
+            header = ','.join(self.param_names)
+            plot_chain_txt_outpath = join(self.outdir, "plot_chain.npy")
+            np.savetxt(fname=plot_chain_txt_outpath, X=self.plot_chain, header=header)
+            self.write_out(f"Wrote logprob chain (npy) to {plot_chain_txt_outpath}")
+        except Exception as e:
+            self.write_out(f"Writing plot chain .npy file failed: {e}", level=logging.ERROR)
+
         # save logprob chain
         logprob_chain_outpath = join(self.outdir, "logprob_chain.pkl")
         with open(logprob_chain_outpath, "wb") as f:
             pickle.dump(self.logprob_chain, f)
-        self.write_out(f"Wrote logprob chain to {logprob_chain_outpath}")
+        self.write_out(f"Wrote logprob chain (pkl) to {logprob_chain_outpath}")
         
         # make the best fit model
         model_outpath = join(self.outdir, "best_fit_models.pkl")

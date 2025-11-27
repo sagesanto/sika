@@ -280,6 +280,7 @@ def optimize_scale_factors(data_flux, data_error, model_fluxes: List[np.ndarray]
 
     #print(f_det.shape, f_det)
     scale_factors = f_det[:,0]
+    scale_factors = np.maximum(scale_factors, 0)  # don't let scale factors be negative
     # Ba_scale = f_det[0, 0]
     # Bb_scale = f_det[1, 0]
     #print(Ba_scale, Bb_scale)
