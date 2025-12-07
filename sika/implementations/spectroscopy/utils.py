@@ -297,7 +297,7 @@ def optimize_scale_factors(data_flux, data_error, model_fluxes: List[np.ndarray]
 # adapted from jerry xuan
 # filt_type -> filter_type: can be 'median' or 'gaussian'
 # medfilt -> filter_size: size of the median filter to apply
-def clean_and_normalize_spectrum(fluxes, wavelengths, errors, bp_sigma=3, filter_type='median', filter_size=100):
+def clean_and_continuum_subtract(fluxes, wavelengths, errors, bp_sigma=3, filter_type='median', filter_size=100):
     clipped_indices = stats.sigma_clip(fluxes, sigma=bp_sigma)
     spike_inds = np.where(clipped_indices.mask==True)
     # print(f"deleting {sum(len(i) for i in spike_inds)} spike points")

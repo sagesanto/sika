@@ -9,7 +9,7 @@ import scipy.ndimage as ndi
 import matplotlib.pyplot as plt
 
 from .crires.crires_spectrum import CRIRESSpectrum
-from .crires.plotting import plot_crires_model
+from .spectra.plotting import plot_model_v_data
 from sika.implementations.spectroscopy.utils import optimize_scale_factors
 from sika.modeling.parameter_set import joint_iter as joint_iter_paramset
 from .spectra.spectrum import Spectrum
@@ -55,7 +55,7 @@ def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_f
     # print("----- done scaling -------")
     return f
 
-class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
+class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
     """A :py:class:`~sika.modeling.sampler.Sampler` that fits N spectra to a spectroscopic dataset.
 
     :type Sampler: :py:class:`~sika.modeling.sampler.Sampler`
@@ -70,60 +70,66 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             self.aux_param_sets.append(self.flux_scale_parameters)  # add this to the list of auxiliary parameter sets so that it will be fit by the sampler
     
 
-    def _make_model(self) -> Dataset[CRIRESSpectrum]:
+    def _make_model(self) -> Dataset[Spectrum]:
         # get individual spectra for each model component
         modeled_datasets = [m.make_model() for m in self.models]
         
         spectra = []
         for selector, data_spectrum in self.data:
-            individual_model_fluxes = {m.name: [] for m in self.models}
-            individual_model_wlens = {m.name: [] for m in self.models}
+            individual_model_fluxes = {}
+            individual_model_wlens = {}
+            # individual_model_fluxes = {m.name: [] for m in self.models}
+            # individual_model_wlens = {m.name: [] for m in self.models}
             modeled_spectra = [md.values(selector) for md in modeled_datasets]
-            wlen, comb_flux, comb_errors, comb_residuals, comb_scale_factors, betas = [], [], [], [], [], []
-            orderwise_model_fluxes = []
-            # i = 0
-            for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen, data_spectrum.flux, data_spectrum.errors):
-            # for (o_wlen, o_flux, o_errors) in zip(data_spectrum.wlen_by_order, data_spectrum.flux_by_order, data_spectrum.error_by_order):
-                assert len(o_wlen) == len(o_flux) == len(o_errors), f"Data wavelength ({len(o_wlen)}), flux ({len(o_flux)}), and error ({len(o_errors)}) arrays must be of the same length within an order"
-                model_fluxes = [scale_model_to_order(o_wlen, s.wlen_flat,s.flux_flat, self.filter_type, self.filter_size) for s in modeled_spectra]
-                bad_mask = np.logical_or.reduce([np.isnan(f) for f in model_fluxes])
+            # wlen, comb_flux, comb_errors, comb_residuals, comb_scale_factors, betas = [], [], [], [], [], []
+            # orderwise_model_fluxes = []
+            
+            d_wlen, d_flux, d_errors = np.array(data_spectrum.wlen,copy=True), np.array(data_spectrum.flux,copy=True), np.array(data_spectrum.errors,copy=True)
+            assert len(d_wlen) == len(d_flux) == len(d_errors), f"Data wavelength ({len(d_wlen)}), flux ({len(d_flux)}), and error ({len(d_errors)}) arrays must be of the same length!"
+            model_fluxes = [scale_model_to_order(d_wlen, np.array(s.wlen,copy=True), np.array(s.flux,copy=True), self.filter_type, self.filter_size) for s in modeled_spectra]
+            bad_mask = np.logical_or.reduce([np.isnan(f) for f in model_fluxes])
+            
+            for (start_wlen, end_wlen) in self.masked_ranges:
+                bad_mask[(d_wlen >= start_wlen) & (d_wlen <= end_wlen)] = True
+            
+            model_fluxes = [f[~bad_mask] for f in model_fluxes]
+            d_wlen = d_wlen[~bad_mask]
+            d_flux = d_flux[~bad_mask]
+            d_errors = d_errors[~bad_mask]
+            
+            for m, f in zip(self.models, model_fluxes):
+                # individual_model_fluxes[m.name].append(f)
+                individual_model_fluxes[m.name] = f
+                # individual_model_wlens[m.name].append(d_wlen)
+                individual_model_wlens[m.name] = d_wlen
+            
+            if self.optimize_flux_scale:
+                scale_factors, beta = optimize_scale_factors(d_flux, d_errors, model_fluxes)
+            else:
+                beta = 1  # not doing error inflation 
+                # aggregate the scale factors by pulling them out of the user-provided parameter set (which gets fit by the sampler)
+                scale_params = self.flux_scale_parameters.sel(selector)
+                scale_factors = []
+                for p in scale_params.values():
+                    scale_factors.append(p)
+                assert len(scale_factors) == len(model_fluxes), f"Scale parameters are not the correct shape! We have {len(model_fluxes)} models but {len(scale_factors)} scale factors: {scale_params}"
                 
-                for (start_wlen, end_wlen) in self.masked_ranges:
-                    bad_mask[(o_wlen >= start_wlen) & (o_wlen <= end_wlen)] = True
-                
-                model_fluxes = [f[~bad_mask] for f in model_fluxes]
-                o_wlen = o_wlen[~bad_mask]
-                o_flux = o_flux[~bad_mask]
-                o_errors = o_errors[~bad_mask]
-                
-                for m, f in zip(self.models, model_fluxes):
-                    individual_model_fluxes[m.name].append(f)
-                    individual_model_wlens[m.name].append(o_wlen)
-                
-                if self.optimize_flux_scale:
-                    scale_factors, beta = optimize_scale_factors(o_flux, o_errors, model_fluxes)
-                else:
-                    beta = 1  # not doing error inflation 
-                    # aggregate the scale factors by pulling them out of the user-provided parameter set (which gets fit by the sampler)
-                    scale_params = self.flux_scale_parameters.sel(selector)
-                    scale_factors = []
-                    for p in scale_params.values():
-                        scale_factors.extend(p)
-                    assert len(scale_factors) == len(model_fluxes), f"Scale parameters are not the correct shape! We have {len(model_fluxes)} models but {len(scale_factors)} scale factors: {scale_params}"
-                    
-                combined_flux = sum(f * sf for f, sf in zip(model_fluxes, scale_factors))
-                residuals = o_flux - combined_flux  # compute the residuals here instead of later just because its convenient. we'll store them in the metadata and pull them out later
-                betas.append(beta)
-                wlen.append(o_wlen)
-                comb_flux.append(combined_flux)
-                comb_errors.append(o_errors * beta)  # scale the errors by the beta factor
-                comb_scale_factors.append(scale_factors)
-                comb_residuals.append(residuals)
+            combined_flux = sum(f * sf for f, sf in zip(model_fluxes, scale_factors))
+            residuals = d_flux - combined_flux  # compute the residuals here instead of later just because its convenient. we'll store them in the metadata and pull them out later
+            errors = d_errors * beta
+            
+            # betas.append(beta)
+            # wlen.append(d_wlen)
+            # comb_flux.append(combined_flux)
+            # comb_errors.append(d_errors * beta)  # scale the errors by the beta factor
+            # comb_scale_factors.append(scale_factors)
+            # comb_residuals.append(residuals)
             
             # param_dict = {model.name: model.parameter_set.sel(selector) for model in self.models}
-            if np.any(np.concatenate(comb_scale_factors) == 0):
-                raise ConstraintViolation("Scale factors of zero!")
-                self.write_out("scale factors of zero!", np.array(comb_scale_factors), "| data selector:", selector, "| parameters:", self.params)
+            if np.any(scale_factors == 0):
+                # raise ConstraintViolation("Scale factors of zero!")
+                self.write_out("scale factors of zero!")
+                # self.write_out("scale factors of zero!", np.array(comb_scale_factors), "| data selector:", selector, "| parameters:", self.params)
 
             model_info = {}
             for model, spec in zip(self.models, modeled_spectra):
@@ -137,14 +143,14 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             
             s = Spectrum(
                 parameters={ },
-                wlen=np.concatenate(wlen),
-                flux=np.concatenate(comb_flux),
-                errors = np.concatenate(comb_errors),
+                wlen=d_wlen,
+                flux=combined_flux,
+                errors = errors,
                 metadata = { **selector, 
-                            "scale_factors": comb_scale_factors, 
+                            "scale_factors": scale_factors, 
                             "n_comp_masked_ranges":self.masked_ranges, 
-                            "beta": betas, 
-                            "residuals": np.concatenate(comb_residuals), 
+                            "beta": beta, 
+                            "residuals": residuals, 
                             "dataset_meta": data_spectrum.metadata, 
                             "dataset_params":data_spectrum.parameters, 
                             "n_free_params":self.nparams,
@@ -215,15 +221,16 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
             fig, axes = plt.subplots(
                 nrows=self.data.size, ncols=1, figsize=(18, 6*self.data.size)
             )
-            try:
-                [a for a in axes]
-            except:
-                axes = [axes]
+            axes = np.atleast_1d(axes)
+            # try:
+            #     [a for a in axes]
+            # except:
+            #     axes = [axes]
             for (selector, data_spectrum), ax in zip(self.data, axes):
                 model_spectrum = self.best_models.values(selector)
-                for o_wlen, o_flux in zip(data_spectrum.wlen, data_spectrum.flux):
-                    ax.plot(o_wlen, o_flux, color="gray", label="Data")
-                    ax.plot(o_wlen, np.interp(o_wlen, model_spectrum.wlen, model_spectrum.flux), color="red", label="Model",alpha=0.75)
+                d_wlen, d_flux = data_spectrum.wlen, data_spectrum.flux
+                ax.plot(d_wlen, d_flux, color="gray", label="Data")
+                ax.plot(d_wlen, np.interp(d_wlen, model_spectrum.wlen, model_spectrum.flux), color="red", label="Model",alpha=0.75)
                 ax.set_title(", ".join(f"{k} = {v}" for k, v in selector.items()))
                 ax.legend()
             plt.suptitle("Best Fit Model vs Data")
@@ -262,10 +269,9 @@ class NComponentSampler(Sampler[CRIRESSpectrum, Spectrum]):
         try:
             for selector, data_spectrum in self.data:
                 model_spectrum = self.best_models.values(selector)
-                for order in range(data_spectrum.norders):
-                    plot_crires_model(model_spectrum, data_spectrum, order, selector)
-                    savefig(f"best_o{order}_{format_selector_string(selector)}.png", config=self.config, outdir=self.outdir)
-                    plt.close()
+                plot_model_v_data(model_spectrum, data_spectrum, selector)
+                savefig(f"best_{format_selector_string(selector)}.png", config=self.config, outdir=self.outdir)
+                plt.close()
         except Exception as e:
             self.write_out('Order-by-order best fit plots failed',level=logging.WARNING)
             print(e)

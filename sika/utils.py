@@ -488,3 +488,10 @@ def parse_sika_args(parser:ArgumentParser):
         outdir = parse_path(outdir)
     
     return run_name, config_path, restore_from, outdir, args
+
+
+def format_selector_string(selector:dict,filename=True):
+    s = f"{selector}".replace("{",'').replace("}",'').replace('\'','')
+    if filename:
+        return s.replace(": ","_")
+    return s

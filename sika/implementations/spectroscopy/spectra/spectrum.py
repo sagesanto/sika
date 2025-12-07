@@ -2,9 +2,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 from sika.config import Config
 from sika.product import DFProduct
 from typing import List
@@ -93,3 +92,36 @@ class Spectrum(DFProduct):
         )
 
 
+@dataclass(kw_only=True)
+class EchelleOrder(Spectrum):
+    def __init__(
+        self,
+        order:int,
+        *args,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.order = order
+        self.metadata['order'] = self.order
+        
+
+class EchelleSpectrum:
+    def __init__(self, order_indices: Optional[List[int]]=None, spectra: Optional[List[EchelleOrder]]=None, metadata:Optional[dict] = None) -> None:
+        self.order_indices: List[int] = order_indices if order_indices is not None else []
+        self.spectra: List[EchelleOrder] = spectra if spectra is not None else []
+        self.metadata = metadata or {}
+    
+    def add_order(self, order_idx: int, spectrum: EchelleOrder):
+        print(f"[ORDER {order_idx}] Adding spec: {spectrum}")
+        self.order_indices.append(order_idx)
+        self.spectra.append(spectrum)
+    
+    @property
+    def norders(self):
+        return len(self.order_indices)
+    
+    @property
+    def orders(self):
+        return dict(zip(self.order_indices,self.spectra))
+    
+    

@@ -16,7 +16,7 @@ from kpicdrp.data import BadPixelMap, Background, TraceParams, DetectorFrame, Wa
 
 
 from sika.modeling import Dataset, DataLoader
-from .kpic_spectrum import KPICSpectrum
+from sika.implementations.spectroscopy.kpic.kpic_spectrum import KPICSpectrum, KPICOrder
 from sika.utils import parse_path
 
 warnings.filterwarnings("ignore",module="astropy.stats.sigma_clipping")
@@ -124,6 +124,7 @@ def load_kpic_spectrum(
     masked_ranges: List[Tuple[int, int]] = None,
     orders=None,
     response_file=None,
+    metadata=None
 ) -> KPICSpectrum:
     """Load a KPIC spectrum from file.
 
@@ -144,6 +145,7 @@ def load_kpic_spectrum(
     # data_dir = join(data_dir,target_name,night)
     assert exists(data_dir)
     # print(data_dir)
+    metadata = metadata or {}
     
     # find the flux files for the requested exposures (if any)
     if exposures is None:
@@ -191,6 +193,10 @@ def load_kpic_spectrum(
         response_wlen = None
         response_flux = None
 
+    metadata.update({"fiber":fiber.lower(), "exposures": exposures, "is_star": is_star, "response_file": response_file, "data_dir":data_dir})
+    # if orders is not None:
+    #     metadata["orders"]=orders
+
     # the kpic spectrum constructor selects by order and does the filtering
     return KPICSpectrum(
         wlen=waves,
@@ -204,17 +210,16 @@ def load_kpic_spectrum(
         orders=orders,
         response_wlen=response_wlen,
         response_flux=response_flux,
-        parameters={},
-        metadata={"fiber":fiber.lower(), "exposures": exposures, "is_star": is_star, "response_file": response_file, "data_dir":data_dir},
+        metadata=metadata
     )
 
 
-class KPICDataLoader(DataLoader[KPICSpectrum]):
+class KPICDataLoader(DataLoader[KPICOrder]):
     @property
     def provided_parameters(self) -> Dict[str, List[Any]]:
         return {"target": []}
 
-    def _call(self, parameters={}) -> Dataset[KPICSpectrum]:
+    def _call(self, parameters={}) -> Dataset[KPICOrder]:
         target_name = parameters.get("target", self.config["target"])
         target_cfg = self.config[target_name]
         data_cfg = target_cfg["data"]
@@ -237,8 +242,11 @@ class KPICDataLoader(DataLoader[KPICSpectrum]):
         # this target is a star if the config does not point to another target as its primary
         is_star = not bool(target_cfg.get("primary", False))
         
+        nights = merged_cfg["nights"]
+        fibers = merged_cfg["fibers"]
+        
         spectra = []
-        for n in merged_cfg["nights"]:
+        for n in nights:
             data_dir = join(basedir,n)
             assert exists(data_dir), f"Data directory {data_dir} does not exist."
             calib_dir = join(calib_basedir, n)
@@ -247,12 +255,13 @@ class KPICDataLoader(DataLoader[KPICSpectrum]):
             else:
                 response_file = None
             exposure_num_cfg = merged_cfg[n]["exposures"]
-            for fiber in merged_cfg["fibers"]:
+            for fiber in fibers:
                 exposures = exposure_num_cfg.get(fiber)
                 if exposures is None:
                     raise ValueError(f"Tried to load data for {target_name} fiber '{fiber}' (night {n}) but no exposures for that fiber were specified in the {target_name}.data.{n}.exposures config section.")
                 
                 self.write_out(f"Loading data for target {target_name} from night {n}, fiber {fiber} in directory {data_dir}. is_star: {is_star}")
+                metadata = dict(target=target_name, display_name=parameters.get("display_name",target_cfg["display_name"]),night=n,fiber=fiber.lower(),directory=data_dir)
                 s = load_kpic_spectrum(
                     data_dir, 
                     calib_dir, 
@@ -264,19 +273,17 @@ class KPICDataLoader(DataLoader[KPICSpectrum]):
                     bp_sigma=bp_sigma,
                     masked_ranges=masked_ranges,
                     orders=orders,
-                    response_file=response_file
+                    response_file=response_file,
+                    metadata=metadata
                 )
-                s.metadata["target"] = target_name
-                s.metadata["display_name"] = parameters.get("display_name",target_cfg["display_name"])
-                s.metadata["night"] = n
-                s.metadata["fiber"] = fiber.lower()
-                s.metadata["directory"] = data_dir
-                spectra.append(s)
-        
+                spectra.extend(s.spectra)
+        print(spectra)        
         dims = []
-        if len(merged_cfg["nights"]) > 1:
+        if len(nights) > 1:
             dims.append("night")
-        if len(merged_cfg["fibers"]) > 1:
+        if len(fibers) > 1:
             dims.append("fiber")
-            
+        if len(spectra) > len(nights) * len(fibers):
+            dims.append("order")       
+        print(dims)     
         return Dataset(spectra, dims=dims)

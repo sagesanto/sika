@@ -55,11 +55,13 @@ class Sampler(Generic[D,M], Task, ABC):
         :type restore_from: Optional[str], optional
         :param constraints: constraints that should be checked at every iteration. If the constraints fail, the loss function will report ``-np.inf`` as the loss. defaults to None
         :type constraints: Optional[List[Constraint]], optional
+        :param aux_params: a set of auxiliary parameters that will be fit by the sampler but do not belong to a model. effective use requires subclassing Sampler and making use of the auxiliary params in that implementation. defaults to None
+        :type aux_params: Optional[AuxiliaryParameterSet], optional
         """
         super().__init__(*args, **kwargs)
         if aux_params is None:
             aux_params = AuxiliaryParameterSet()
-        self.aux_params = aux_params
+        self.aux_param_sets = [aux_params]   # sets of auxiliary parameters
         self.outdir = outdir
         self.run_prefix = run_prefix
         makedirs(outdir, exist_ok=True)
@@ -77,7 +79,7 @@ class Sampler(Generic[D,M], Task, ABC):
             self.data: Dataset[D] = None
         self.constraints = constraints if constraints is not None else []
 
-        self.params = [p for model in models for p in model.params] + self.aux_params.unfrozen
+        self.params = [p for model in models for p in model.params] + [p for pset in self.aux_param_sets for p in pset.unfrozen]
         
     @property
     def previous(self):
@@ -90,7 +92,8 @@ class Sampler(Generic[D,M], Task, ABC):
         n = []
         for model in self.models:
             n.extend(model.param_names)
-        n.extend(self.aux_params.all_names())
+        for pset in self.aux_param_sets:
+            n.extend(pset.all_names())
         return n
     
     @property
@@ -98,7 +101,8 @@ class Sampler(Generic[D,M], Task, ABC):
         n = []
         for model in self.models:
             n.extend(model.short_param_names)
-        n.extend(self.aux_params.short_names())
+        for pset in self.aux_param_sets:
+            n.extend(pset.short_names())
         return n
     
     @property
@@ -106,7 +110,7 @@ class Sampler(Generic[D,M], Task, ABC):
         psets = []
         for m in self.models:
             psets.extend(m.parameter_sets)
-        psets += [self.aux_params]
+        psets.extend[self.aux_param_sets]
         return psets
         
     def node_spec(self) -> NodeSpec:
@@ -127,7 +131,7 @@ class Sampler(Generic[D,M], Task, ABC):
         args["data_params"] = self._data_params
         args["restore_from"] = self.restore_from
         args["constraints"] = self.constraints
-        args["aux_params"] = self.aux_params
+        args["aux_params"] = self.aux_param_sets
         return args
         
     # def configure(self, config:Union[None,Config], logger: Union[None,Logger]):
@@ -150,10 +154,14 @@ class Sampler(Generic[D,M], Task, ABC):
     def set_model_params(self,parameters:List[float]):
         """ :meta private: """
         grouped_params = self._group_params(parameters)
-        aux_params = grouped_params.pop()
+        aux_psets = []
+        for _ in self.aux_param_sets:
+            aux_psets.append(grouped_params.pop())
         for params, model in zip(grouped_params, self.models):
             model.set_params(params)
-        self.aux_params.set_values_flat(np.array(aux_params))
+        aux_psets.reverse()
+        for i, pset in enumerate(aux_psets):
+            self.aux_param_sets[i].set_values_flat(np.array(pset))
     
     def make_model(self,parameters:List[float]) -> Dataset[M]:
         """ Make a combined model from the flattened parameters and return it. """
@@ -219,14 +227,16 @@ class Sampler(Generic[D,M], Task, ABC):
             for transform in m.prior_transforms():
                 x[i] = transform(u[i])
                 i += 1
-        for transform in self.aux_params.get_unfrozen_transforms():
-            x[i] = transform(u[i])
-            i += 1
+        for pset in self.aux_param_sets:
+            for transform in pset.get_unfrozen_transforms():
+                x[i] = transform(u[i])
+                i += 1
         return x
     
     def prior_transforms(self) -> List[PriorTransform]:
         p = [t for m in self.models for t in m.prior_transforms()]
-        p.extend(self.aux_params.get_unfrozen_transforms())
+        for pset in self.aux_param_sets:
+            p.extend(pset.get_unfrozen_transforms())
         return p
     
     def _setup(self):
@@ -249,10 +259,11 @@ class Sampler(Generic[D,M], Task, ABC):
             model.set_coords(
                 data_coords
             )  # inform the model of the data coordinates (will inform parameters)
-        self.aux_params.set_coords(data_coords)
-        self.nparams_per = [model.nvals for model in self.models] + [self.aux_params.nvals]
-        self.write_out("Number of parameters per model:", self.nparams_per[:-1])
-        self.write_out("Number of auxiliary parameters:", self.nparams_per[-1])
+        for pset in self.aux_param_sets:
+            pset.set_coords(data_coords)
+        self.nparams_per = [model.nvals for model in self.models] + [auxpset.nvals for auxpset in self.aux_param_sets]
+        self.write_out("Number of parameters per model:", self.nparams_per[:-len(self.aux_param_sets)])
+        self.write_out("Number of auxiliary parameters:", self.nparams_per[-len(self.aux_param_sets)])
         self.nparams = sum(self.nparams_per)
         self.write_out("Model setup complete.")
         if self.data.coords:

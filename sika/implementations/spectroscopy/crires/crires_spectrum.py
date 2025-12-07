@@ -5,7 +5,7 @@ from matplotlib.axes import Axes
 from typing import List, Tuple, Optional
 
 from sika.implementations.spectroscopy.spectra.spectrum import Spectrum
-from sika.implementations.spectroscopy.utils import clean_and_normalize_spectrum
+from sika.implementations.spectroscopy.utils import clean_and_continuum_subtract
 
 
 
@@ -45,7 +45,7 @@ class CRIRESSpectrum(Spectrum):
             flux_order = np.delete(flux_order, mask)
             error_order = np.delete(error_order, mask)
             # clean and normalize the spectrum for this order
-            flux_order, wlen_order, error_order, norm_constant = clean_and_normalize_spectrum(
+            flux_order, wlen_order, error_order, norm_constant = clean_and_continuum_subtract(
                 flux_order, wlen_order, error_order, filter_type=filter_type, filter_size=filter_size, bp_sigma=bp_sigma
             )
 

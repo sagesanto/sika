@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Tuple, TypeVar, Generic, TypeVarTuple
 from .store import FileWritable
 import pandas as pd
 import numpy as np
+from copy import deepcopy
 
 @dataclass
 class Product(ABC):
@@ -15,6 +16,9 @@ class Product(ABC):
     parameters: Dict[str, Any]
     #: a store of key-value metadata about this product. when constructing a multi-dimensional :py:class:`~sika.modeling.data.Dataset`, keys in the metadata that line up with known coordinates are used as indices. See :py:class:`~sika.modeling.data.Dataset` for more
     metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    def copy(self):
+        return deepcopy(self)
 
 @dataclass
 class FileWritableProduct(Product, FileWritable, ABC):

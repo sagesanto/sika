@@ -7,23 +7,22 @@ from sika.modeling.data import Dataset
 from sika import ProviderMiddleware, Provider, Product
 from sika.modeling import Model, CompositeModel, EmptyParameterSet, Dataset, DataLoader
 from sika.implementations.spectroscopy import Spectrum
-from .kpic_spectrum import KPICSpectrum
+from .kpic_spectrum import KPICSpectrum, KPICOrder
 
 
-def model_to_kpic_grid(model:Spectrum, kpic_spec: KPICSpectrum):
-    convolved_fluxes = []
-    for i in range(len(kpic_spec.orig_wlen)):
-        convolved_fluxes.append(convolve_and_sample(np.array(kpic_spec.orig_wlen[i]),np.array(kpic_spec.trace_sigmas[i]),np.array(model.wlen), np.array(model.flux)))
-    model.flux = np.array(convolved_fluxes).flatten()
-    model.wlen = np.array(kpic_spec.orig_wlen).flatten()
+def model_to_kpic_grid(model:Spectrum, kpic_spec: KPICOrder):
+    # print(f"orig wlen size: {len(kpic_spec.orig_wlen)}, trace sigmas size: {len(kpic_spec.trace_sigmas)}, model wlen size: {len(model.wlen)}, model flux size: {len(model.flux)} ")
+    convolved_flux = convolve_and_sample(np.array(kpic_spec.orig_wlen),np.array(kpic_spec.trace_sigmas),np.array(model.wlen), np.array(model.flux))
+    model.flux = np.array(convolved_flux)
+    model.wlen = np.array(kpic_spec.orig_wlen)
     
     model.metadata["aligned_to_kpic"] = True
     return model
 
-def apply_kpic_response(model:Spectrum, kpic_spec: KPICSpectrum):
+def apply_kpic_response(model:Spectrum, kpic_spec: KPICOrder):
     if kpic_spec.response_flux is None:
         raise ValueError("KPIC spectrum not properly initialized with response. Set the response file in the config for each night's data.")
-    model.flux *= kpic_spec.response_flux.flatten()
+    model.flux *= np.array(kpic_spec.response_flux)
     return model
 
 D = TypeVar('D', bound=Product, covariant=True)
@@ -52,12 +51,12 @@ class DataWrapper(Provider[Dataset[D]]):
         return {}
 
 class KPICModel(CompositeModel[Spectrum]):
-    def __init__(self,spectral_model: Model[Spectrum], kpic_data: Dataset[D] | DataLoader[D], *args, data_params={}, **kwargs):
+    def __init__(self,spectral_model: Model[Spectrum], kpic_data: Dataset[KPICOrder] | DataLoader[KPICOrder], *args, data_params={}, **kwargs):
         super().__init__(EmptyParameterSet(), *args, **kwargs)
         self.spectral_model = spectral_model
         self.data_wrapper = DataWrapper(data_or_loader=kpic_data)
         self.data_params = data_params
-        self.data: Dataset[KPICSpectrum] = None
+        self.data: Dataset[KPICOrder] = None
 
     def _setup(self):
         self.data = self.data_wrapper(self.data_params)
@@ -75,7 +74,14 @@ class KPICModel(CompositeModel[Spectrum]):
 
         kpic_models = []
         for sel, kpic_spec in self.data:
-            model = model_set.values(sel)
+            model = model_set.values(sel).copy()
+            # print("------")
+            # print("sel:",sel)
+            # print("data:",kpic_spec)
+            # print("model:",self.spectral_model.name)
+            # print("model metadata:",model.metadata)
+            # print("modelset coords:",model_set.coords)
+            # print("------")
             model = model_to_kpic_grid(model, kpic_spec)
             model = apply_kpic_response(model, kpic_spec)
             model.metadata.update(sel)  # so that the dataset knows what fiber/night/etc this spectrum corresponds to
