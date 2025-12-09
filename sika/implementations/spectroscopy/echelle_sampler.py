@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import List, Optional, Union
 import numpy as np 
 import pandas as pd
 from os.path import join
@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 
 from .crires.crires_spectrum import CRIRESSpectrum
 from .spectra.plotting import plot_model_v_data
-from sika.implementations.spectroscopy.utils import optimize_scale_factors
+from sika.implementations.spectroscopy.utils import optimize_scale_factors, ErrorInflationParameterSet
 from sika.modeling.parameter_set import joint_iter as joint_iter_paramset
 from .spectra.spectrum import Spectrum
-from sika.modeling import Sampler, Dataset, ConstraintViolation, AuxiliaryParameterSet
+from sika.modeling import Sampler, Dataset, ConstraintViolation, AuxiliaryParameterSet, Parameter, ParameterSet, PriorTransform
 
 # this is required or pickling of things like lambdas will not work
 import dill
@@ -22,7 +22,7 @@ dynesty.utils.pickle_module = dill
 
 from sika.utils import savefig, format_selector_string
 
-__all__ = ["NComponentSampler", "scale_model_to_order"]
+__all__ = ["NComponentEchelleSampler", "scale_model_to_order"]
 
 # adapted from jerry xuan
 def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_flux:np.ndarray, filter_type, filter_size) -> np.ndarray:
@@ -55,20 +55,25 @@ def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_f
     # print("----- done scaling -------")
     return f
 
+
 class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
     """A :py:class:`~sika.modeling.sampler.Sampler` that fits N spectra to a spectroscopic dataset.
 
     :type Sampler: :py:class:`~sika.modeling.sampler.Sampler`
     """
     
-    def __init__(self, *args, flux_scale_parameters:Optional[AuxiliaryParameterSet]=None, **kwargs):
+    def __init__(self, *args, flux_scale_parameters:Optional[AuxiliaryParameterSet]=None, error_inflation_terms:Optional[ErrorInflationParameterSet]=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.optimize_flux_scale = True
         if flux_scale_parameters is not None:
+            # assert error_inflation_terms is not None, "If flux scaling are fit parameters, error_inflation_terms parameters must also be provided."
             self.optimize_flux_scale = False
             self.flux_scale_parameters = flux_scale_parameters  # make this a property so that we can keep track of which set of parameters are the flux scale parameters
             self.aux_param_sets.append(self.flux_scale_parameters)  # add this to the list of auxiliary parameter sets so that it will be fit by the sampler
-    
+            self.error_inflation_terms = error_inflation_terms
+            if error_inflation_terms is not None:
+                self.aux_param_sets.append(self.error_inflation_terms)
+            
 
     def _make_model(self) -> Dataset[Spectrum]:
         # get individual spectra for each model component
@@ -107,6 +112,9 @@ class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
                 scale_factors, beta = optimize_scale_factors(d_flux, d_errors, model_fluxes)
             else:
                 beta = 1  # not doing error inflation 
+                if self.error_inflation_terms is not None:
+                    beta = self.error_inflation_terms.beta.values(selector)
+                    
                 # aggregate the scale factors by pulling them out of the user-provided parameter set (which gets fit by the sampler)
                 scale_params = self.flux_scale_parameters.sel(selector)
                 scale_factors = []

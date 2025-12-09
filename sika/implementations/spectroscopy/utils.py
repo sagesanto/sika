@@ -1,6 +1,6 @@
 from os import listdir
 from os.path import join, exists, basename, splitext
-from typing import List
+from typing import List, Union
 from datetime import datetime
 
 from scipy.ndimage import gaussian_filter
@@ -19,7 +19,7 @@ import tqdm
 
 from sika.utils import parse_path, write_out
 from sika.config import Config
-from sika.modeling import Dataset
+from sika.modeling import Dataset, Parameter, ParameterSet, PriorTransform
 
 def jd_to_dt(hjd):
     time = Time(hjd, format='jd', scale='tdb')
@@ -397,3 +397,14 @@ class SpecificKBandLossAdjustment:
         all_chi2 = np.nansum((k_ratio_resid ** 2 / self.kband_ratio_error ** 2))
 
         return -0.5 * all_chi2
+    
+    
+class ErrorInflationParameterSet(ParameterSet):
+    def __init__(
+        self,
+        beta: Union[PriorTransform, Parameter],
+    ):
+        self.name = "Error Inflation"
+        self.beta = beta
+        self.setup()
+    
