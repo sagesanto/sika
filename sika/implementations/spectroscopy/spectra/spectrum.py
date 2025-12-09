@@ -40,6 +40,17 @@ class Spectrum(DFProduct):
         self.flux = self.flux[mask]
         return self
     
+    def normalize(self,percentile=90):
+        """ Divide this spectrum's flux (and error) by its `percentile` percentile inplace"""
+        normfactor = np.nanpercentile(self.flux,percentile)
+        if normfactor == 0 or np.isnan(normfactor) or np.isinf(normfactor):
+            print("flux:",self.flux)
+            print(self)
+            raise ValueError(f"Scale factor for percentile {percentile} is {normfactor}, cannot scale flux.")
+        self.flux /= normfactor
+        if self.errors is not None:
+            self.errors /= normfactor
+    
     @property
     def wlen_flat(self) -> np.ndarray:
         return self.wlen
@@ -52,7 +63,7 @@ class Spectrum(DFProduct):
     def errors_flat(self) -> np.ndarray:
         return self.errors
 
-    def plot(self, ax=None, **kwargs):
+    def plot(self, ax=None, shade_errors=True, **kwargs):
         """
         Plot the spectrum on the given axes.
         """
@@ -65,8 +76,8 @@ class Spectrum(DFProduct):
         merged_kwargs.update(kwargs)
 
         ax.plot(self.wlen, self.flux, **merged_kwargs)
-        if self.errors is not None:
-            ax.fill_between(self.wlen, self.flux - self.errors, self.flux + self.errors, alpha=0.2)
+        if self.errors is not None and shade_errors:
+            ax.fill_between(self.wlen, self.flux - self.errors, self.flux + self.errors, alpha=0.2,color='gray')
 
         ax.set_ylabel(r"Flux [erg/s/cm$^2$/cm]", fontsize=12)
         ax.set_xlabel("Wavelength [microns]", fontsize=12)

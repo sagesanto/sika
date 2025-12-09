@@ -19,14 +19,9 @@ class PercentileScaler(ProviderMiddleware[Spectrum]):
         self.percentile = percentile
 
     def product_middleware(self, model: Spectrum) -> Spectrum:
-        scale_factor = np.nanpercentile(model.flux, self.percentile)
-        if scale_factor == 0 or np.isnan(scale_factor) or np.isinf(scale_factor):
-            self.write_out("flux:",model.flux)
-            self.write_out(model)
-            raise ValueError(f"Scale factor for percentile {self.percentile} is {scale_factor}, cannot scale flux.")
-        model.flux /= scale_factor
-        model.errors /= scale_factor
-        model.metadata["scale_factor"] = scale_factor
+        # lol this used to actually perform the normalization but i just made it a method instead
+        model.normalize()
+        # model.metadata["scale_factor"] = scale_factor
         return model
 
 class PassbandRestrictor(ProviderMiddleware[Spectrum]):

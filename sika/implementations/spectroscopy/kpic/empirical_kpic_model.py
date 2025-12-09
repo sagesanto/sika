@@ -11,13 +11,14 @@ class EmpiricalKPICModel(Model[Spectrum]):
     A model for a companion star that uses an empirical CRIRES spectrum.
     """
 
-    def __init__(self, target_name, *args, **kwargs):
+    def __init__(self, target_name, *args, normalize=True, **kwargs):
         super().__init__(EmptyParameterSet(), *args, **kwargs)
         self.empirical_spectrum: Dataset[KPICSpectrum] = None
         self.target_name = target_name
         self.disp_name = None
         self.ds = None
-        self.loader = KPICDataLoader()
+        self.normalize=normalize
+        self.loader = KPICDataLoader(normalize=self.normalize)
 
     @property
     def previous(self):

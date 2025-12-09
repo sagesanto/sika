@@ -91,7 +91,7 @@ class GridCompanionModel(Model[Spectrum]):
             "grid_companion_model", {}
         )
         self.masked_ranges = self.model_specific_config.get("masked_ranges", [])
-        print("Masked ranges:", self.masked_ranges)
+        # print("Masked ranges:", self.masked_ranges)
 
     def get_from_provider(self, params) -> Spectrum:
         """

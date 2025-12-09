@@ -1,6 +1,7 @@
+from logging import Logger
 from os.path import join, exists
 from glob import glob
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 from enum import Enum
 import numpy as np
 import pandas as pd
@@ -15,8 +16,10 @@ from kpicdrp.caldb import wave_caldb, trace_caldb
 from kpicdrp.data import BadPixelMap, Background, TraceParams, DetectorFrame, Wavecal, Spectrum as KSpectrum
 
 
+from sika.config.config import Config
 from sika.modeling import Dataset, DataLoader
 from sika.implementations.spectroscopy.kpic.kpic_spectrum import KPICSpectrum, KPICOrder
+from sika.task import Task
 from sika.utils import parse_path
 
 warnings.filterwarnings("ignore",module="astropy.stats.sigma_clipping")
@@ -113,18 +116,19 @@ def combine_star_spectrum(star_specs: drp_data.Dataset, fiber: str):
 
 # def load_crires_spectrum(data_file: str, wavelength_file: str, wavelen_range: tuple, filter_size:int, filter_type:str, bp_sigma:int, masked_ranges:List[Tuple[int,int]]=None) -> CRIRESSpectrum:
 def load_kpic_spectrum(
-    data_dir,
-    calib_dir,
+    data_dir: str,
+    calib_dir: str,
     exposures: list[str],
     fiber: str,
     is_star: bool,
     filter_size: int,
     filter_type: str,
     bp_sigma: int,
-    masked_ranges: List[Tuple[int, int]] = None,
-    orders=None,
-    response_file=None,
-    metadata=None
+    masked_ranges: Optional[List[Tuple[float, float]]] = None,
+    normalize: bool = False,
+    orders: Optional[List[int]] = None,
+    response_file:Optional[str] = None,
+    metadata:Optional[Dict[str,Any]] = None
 ) -> KPICSpectrum:
     """Load a KPIC spectrum from file.
 
@@ -134,11 +138,26 @@ def load_kpic_spectrum(
     :type calib_dir: str
     :param exposures: List of exposure filenames to include
     :type exposures: list[str]
+    :param fiber: the name of the fiber to extract spectrum from. ex. 's2'. To load multiple fibers from the same file, call this function multiple times.
+    :type fiber: str
+    :param is_star: whether or not the data is a spectrum of a star, which changes whether it will be loaded with :py:meth:`~sika.implementations.spectroscopy.kpic.kpic_dataloader.combine_planet_spectrum` or :py:meth:`~sika.implementations.spectroscopy.kpic.kpic_dataloader.combine_star_spectrum` behind the scenes. (see the kpicdrp `stellar_spectra_from_files <https://github.com/kpicteam/kpic_pipeline/blob/main/kpicdrp/utils.py#L128/>`__ for more)
     :param filter_size: Size of the filter to apply
     :type filter_size: int
     :param filter_type: Type of the filter to apply - 'median' or 'gaussian'
     :type filter_type: str
-    :rtype: CRIRESSpectrum
+    :param bp_sigma: the sigma at which flux should be sigma-clipped
+    :type bp_sigma: float
+    :param masked_ranges: a list of (wlen_start, wlen_end) tuples that denote ranges of wavelengths that should be masked in the spectrum during processing and then deleted
+    :type masked_ranges: List[Tuple[float, float]]
+    :param normalize: whether to normalize each order's flux by dividing by its 90th percentile value. default False
+    :type normalize: bool
+    :param orders: if provided, will keep only the orders specified in this **zero-index** list of indices. loads and keeps all orders by default.
+    :type orders: List[int] | None
+    :param response_file: the path to a KPIC response file containing a kpicdrp.drp_data.Spectrum response for the targeted fiber. required if this spectra will be used as data input to :py:class:`~sika.implementations.spectroscopy.kpic.kpic_model.KPICModel`
+    :type response_file: str
+    :param metadata: a dictionary of metadata to attach to the loaded spectrum. spectra loaded by this function will always additionally have 'fiber', 'exposures', 'is_star', 'response_file', and 'data_dir' metadata attached
+    :type metadata: Optional[dict[str,Any]]
+    :rtype: KPICSpectrum
     """
 
     # determine which frames will be combined for this dataset
@@ -206,6 +225,7 @@ def load_kpic_spectrum(
         filter_type=filter_type,
         filter_size=filter_size,
         bp_sigma=bp_sigma,
+        normalize=normalize,
         masked_ranges=masked_ranges,
         orders=orders,
         response_wlen=response_wlen,
@@ -215,6 +235,11 @@ def load_kpic_spectrum(
 
 
 class KPICDataLoader(DataLoader[KPICOrder]):
+    
+    def __init__(self, *args, normalize:bool=False, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.normalize = normalize
+    
     @property
     def provided_parameters(self) -> Dict[str, List[Any]]:
         return {"target": []}
@@ -274,7 +299,8 @@ class KPICDataLoader(DataLoader[KPICOrder]):
                     masked_ranges=masked_ranges,
                     orders=orders,
                     response_file=response_file,
-                    metadata=metadata
+                    metadata=metadata,
+                    normalize=self.normalize
                 )
                 spectra.extend(s.spectra)
         print(spectra)        

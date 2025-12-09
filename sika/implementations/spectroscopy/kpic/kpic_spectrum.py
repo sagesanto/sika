@@ -33,17 +33,51 @@ class KPICSpectrum(EchelleSpectrum):
                     filter_type="median",
                     filter_size=100,
                     bp_sigma=3,
-                    masked_ranges: List[Tuple[int, int]] = None,
+                    masked_ranges: Optional[List[Tuple[float, float]]] = None,
+                    normalize: bool = False,
                     orders: List[int] | None = None, 
                     response_wlen: Optional[np.ndarray] = None,
                     response_flux: Optional[np.ndarray] = None,
                     metadata: dict | None = None
                 ) -> None:
+        """A Keck Planet Imager and Characterizer (KPIC) spectrum.
+        
+        :param wlen: (Norders, Nchannels) array of wavelengths
+        :type wlen: np.ndarray
+        :param flux: (Norders, Nchannels) array of fluxes
+        :type flux: np.ndarray
+        :param errors: (Norders, Nchannels) array of flux errors, in the same units as the flux
+        :type errors: np.ndarray
+        :param trace_sigmas:
+        :type trace_sigmas:
+        :param filter_size: size of filter to apply for continuum subtraction
+        :type filter_size: int
+        :param filter_type: type of filter to apply - 'median' or 'gaussian'
+        :type filter_type: str
+        :param bp_sigma: the sigma at which flux should be sigma-clipped. defaults to 3
+        :type bp_sigma: float
+        :param masked_ranges: a list of (wlen_start, wlen_end) tuples that denote ranges of wavelengths that should be masked in the spectrum during processing and then deleted
+        :type masked_ranges: List[Tuple[float, float]]
+        :param normalize: whether to normalize each order's flux by dividing by its 90th percentile value. default False
+        :type normalize: bool
+        :param orders: if provided, will keep only the orders specified in this **zero-index** list of indices. loads and keeps all orders by default.
+        :type orders: List[int] | None
+        :param response_wlen: (Norders, Nchannels) array of wavelengths of the spectral response spectra
+        :param response_flux: (Norders, Nchannels) array of spectral response flux. required if this spectra will be used as data input to :py:class:`~sika.implementations.spectroscopy.kpic.kpic_model.KPICModel`
+        :type response_flux: Optional[np.ndarray]
+        :param metadata: a dictionary of metadata to attach to the loaded spectrum. spectra loaded by this function will always additionally have 'fiber', 'exposures', 'is_star', 'response_file', and 'data_dir' metadata attached
+        :type metadata: Optional[dict[str,Any]]
+        :rtype: KPICSpectrum
+        """
+        
         super().__init__(order_indices=[], spectra=[], metadata=metadata)
         self.wlen = wlen
         self.flux = flux
         self.errors = errors
-        metadata = metadata or {}
+        if metadata is not None:
+            metadata = metadata.copy()
+        else:
+            metadata = {}
         
         self.trace_sigmas = trace_sigmas
         wlen_by_order: List[List[float]] = []
@@ -98,6 +132,8 @@ class KPICSpectrum(EchelleSpectrum):
                     bp_sigma=bp_sigma,
                 )
             )
+
+            
             order_spec = KPICOrder(
                 parameters={},
                 orig_wlen=np.array(self.orig_wlen[i]),
@@ -109,10 +145,15 @@ class KPICSpectrum(EchelleSpectrum):
                 errors=error_order,
                 metadata=metadata.copy()
             )
+                        
+            if normalize:
+                order_spec.normalize(percentile=90)
+                order_spec.metadata["normalized"] = True
+                
             self.add_order(o, order_spec)
             wlen_by_order.append(wlen_order)
-            flux_by_order.append(flux_order)
-            error_by_order.append(error_order)
+            flux_by_order.append(order_spec.flux)
+            error_by_order.append(order_spec.errors)
             # trace_sigma_by_order.append(trace_sigma_order)
             del_masks.append(del_mask)
         self.del_masks = np.array(del_masks)

@@ -10,12 +10,10 @@ from sika.implementations.spectroscopy import Spectrum
 from .kpic_spectrum import KPICSpectrum, KPICOrder
 
 
-def model_to_kpic_grid(model:Spectrum, kpic_spec: KPICOrder):
-    # print(f"orig wlen size: {len(kpic_spec.orig_wlen)}, trace sigmas size: {len(kpic_spec.trace_sigmas)}, model wlen size: {len(model.wlen)}, model flux size: {len(model.flux)} ")
+def model_to_kpic_grid(model:Spectrum, kpic_spec: KPICOrder):    
     convolved_flux = convolve_and_sample(np.array(kpic_spec.orig_wlen),np.array(kpic_spec.trace_sigmas),np.array(model.wlen), np.array(model.flux))
     model.flux = np.array(convolved_flux)
     model.wlen = np.array(kpic_spec.orig_wlen)
-    
     model.metadata["aligned_to_kpic"] = True
     return model
 
@@ -75,16 +73,15 @@ class KPICModel(CompositeModel[Spectrum]):
         kpic_models = []
         for sel, kpic_spec in self.data:
             model = model_set.values(sel).copy()
-            # print("------")
-            # print("sel:",sel)
-            # print("data:",kpic_spec)
-            # print("model:",self.spectral_model.name)
-            # print("model metadata:",model.metadata)
-            # print("modelset coords:",model_set.coords)
-            # print("------")
-            model = model_to_kpic_grid(model, kpic_spec)
-            model = apply_kpic_response(model, kpic_spec)
+            
+            # in keeping with kpic DRP forward model (https://github.com/kpicteam/kpic_pipeline/blob/main/kpicdrp/xcorr.py#L360),
+            # we normalize flux, convolve to data resolution using the LSF,
+            # align to the data grid, and then normalize again (because convolution does not conserve flux):
+            model.normalize(percentile=90)  # normalize
+            model = model_to_kpic_grid(model, kpic_spec)  # convolve and align
+            model.normalize(percentile=90)  # normalize
+            model = apply_kpic_response(model, kpic_spec)  # apply response
             model.metadata.update(sel)  # so that the dataset knows what fiber/night/etc this spectrum corresponds to
             kpic_models.append(model)
-        
+            
         return Dataset(kpic_models, dims=self.data.dims)

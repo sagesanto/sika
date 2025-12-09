@@ -46,9 +46,13 @@ def plot_model_v_data(
 
 # --------- Plot individual models -------
     rename_dict = model.metadata.get("model_disp_names",{})
-    for k, v in model.metadata["models"].items():
+    n_submodels = len(model.metadata["models"])
+    scale_factors = np.ones(n_submodels)
+    if "scale_factors" in model.metadata:
+        scale_factors = np.array(model.metadata["scale_factors"])
+    for i, (k, v) in enumerate(model.metadata["models"].items()):
         name = v["dispname"]
-        indiv_ax.plot(model_wlen, v["flux"]+NORM_ADD_FACTOR, label=name)
+        indiv_ax.plot(model_wlen, v["flux"] * scale_factors[i] + NORM_ADD_FACTOR, label=name)
 
     indiv_ax.set_title(
         f"Reduced $\chi^2$={reduced_chi_2:.4f}, {selector_str}"
