@@ -79,8 +79,12 @@ class Sampler(Generic[D,M], Task, ABC):
             self.data: Dataset[D] = None
         self.constraints = constraints if constraints is not None else []
 
-        self.params = [p for model in models for p in model.params] + [p for pset in self.aux_param_sets for p in pset.unfrozen]
-        
+        # self.params = [p for model in models for p in model.params] + [p for pset in self.aux_param_sets for p in pset.unfrozen]
+    
+    @property
+    def params(self):
+        return [p for model in self.models for p in model.params] + [p for pset in self.aux_param_sets for p in pset.unfrozen]
+    
     @property
     def previous(self):
         if self.data_provider is not None:

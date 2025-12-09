@@ -48,6 +48,7 @@ class BinaryParameterSet(ParameterSet):
 class SimpleBinary(CompositeModel[Spectrum]):
     def __init__(
         self,
+        name: str,
         binary_params: BinaryParameterSet,
         companion_a: GridCompanionModel,
         companion_b: GridCompanionModel,
@@ -58,7 +59,7 @@ class SimpleBinary(CompositeModel[Spectrum]):
         Binary model that combines two single-component models (which have had
         rv and vsini applied and have been convolved to instrument resolution).
         """
-        super().__init__(binary_params, *args, **kwargs)
+        super().__init__(name, binary_params, *args, **kwargs)
         self.companion_a = companion_a
         self.companion_b = companion_b
 
@@ -127,6 +128,7 @@ class SimpleBinary(CompositeModel[Spectrum]):
 class CompositeKBinary(CompositeModel[Spectrum]):
     def __init__(
         self,
+        name,
         binary_params: Gl229BParameterSet,
         companion_a: GridCompanionModel,
         companion_b: GridCompanionModel,
@@ -140,7 +142,7 @@ class CompositeKBinary(CompositeModel[Spectrum]):
         spectra from each companion must have a 'k_band_flux' top-level metadata
         key.
         """
-        super().__init__(binary_params, *args, **kwargs)
+        super().__init__(name,binary_params, *args, **kwargs)
         self.companion_a = companion_a
         self.companion_b = companion_b
 

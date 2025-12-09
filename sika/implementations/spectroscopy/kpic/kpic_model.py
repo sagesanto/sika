@@ -49,8 +49,8 @@ class DataWrapper(Provider[Dataset[D]]):
         return {}
 
 class KPICModel(CompositeModel[Spectrum]):
-    def __init__(self,spectral_model: Model[Spectrum], kpic_data: Dataset[KPICOrder] | DataLoader[KPICOrder], *args, data_params={}, **kwargs):
-        super().__init__(EmptyParameterSet(), *args, **kwargs)
+    def __init__(self, name:str, spectral_model: Model[Spectrum], kpic_data: Dataset[KPICOrder] | DataLoader[KPICOrder], *args, data_params={}, **kwargs):
+        super().__init__(name, EmptyParameterSet(), *args, **kwargs)
         self.spectral_model = spectral_model
         self.data_wrapper = DataWrapper(data_or_loader=kpic_data)
         self.data_params = data_params

@@ -122,6 +122,11 @@ class Model(Generic[T], Task, ABC):
     
     
 class CompositeModel(Model[T]):
+    
+    def __init__(self, name:str, *args, **kwargs):
+        self._name = name
+        super().__init__(*args, **kwargs)
+    
     """A `Model` that manages and calls other `Model`s and synthesizes something from their outputs."""
     @property
     @abstractmethod
@@ -209,3 +214,12 @@ class CompositeModel(Model[T]):
             params = parameters[running_param_index:running_param_index+nparams]
             running_param_index += nparams
             model.set_params(params)
+            
+    @property
+    def name(self) -> str:
+        basename = super().name
+        return f"{self._name} ({basename})"
+    
+    @property
+    def display_name(self) -> str:
+        return self._name
