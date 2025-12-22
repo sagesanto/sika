@@ -122,7 +122,6 @@ class GridCompanionModel(Model[Spectrum]):
         for spectra_params, remaining_params in self.parameter_set.groupby(
             self.spectra_keys
         ):
-            # print("Making spectra with parameters:", spectra_params)
             spectrum = self.spectra_provider(
                 spectra_params
             )  # get the spectrum from the provider
@@ -154,6 +153,7 @@ class GridCompanionModel(Model[Spectrum]):
                 
                 for coord, rv_dict in zip(coords, rvs):
                     rv = rv_dict["rv"]
+                    # print(f"({self.name}) Making spectra with parameters:", spectra_params, f"vsini: {vsini}", f"rv: {rv}")
                     shifted_flux = apply_rv_shift(rv, spectrum.wlen, broadened_flux)
 
                     # very very important: coord makes it into the metadata we plan to attach

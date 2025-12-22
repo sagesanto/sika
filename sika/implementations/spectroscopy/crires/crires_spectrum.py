@@ -54,6 +54,8 @@ class CRIRESSpectrum(Spectrum):
             error_by_order.append(error_order)
             norm_constants.append(norm_constant)
         
+        self.metadata["continuum_subtracted"] = True
+        
         self.wlen = wlen_by_order
         self.flux = flux_by_order
         self.errors = error_by_order

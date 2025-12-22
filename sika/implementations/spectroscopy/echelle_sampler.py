@@ -25,9 +25,9 @@ from sika.utils import savefig, format_selector_string
 __all__ = ["NComponentEchelleSampler", "scale_model_to_order"]
 
 # adapted from jerry xuan
-def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_flux:np.ndarray, filter_type, filter_size) -> np.ndarray:
+def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_flux:np.ndarray, filter_type, filter_size, subtract_continuum:bool=True) -> np.ndarray:
     # take a model representing the entire spectrum and crop/scale it to a specific order in the data
-    # performs continuum subtraction with a filter of type 'filter_type' and of size 'filter_size'
+    # performs continuum subtraction with a filter of type 'filter_type' and of size 'filter_size', unless told not to
     # returns the scaled flux array for that order
     f = np.interp(order_wlen, model_wlen, model_flux)
     nans_in_interp = len(np.where(np.isnan(f))[0])
@@ -44,13 +44,14 @@ def scale_model_to_order(order_wlen: np.ndarray, model_wlen: np.ndarray, model_f
     # print("interpolated flux shape:", f.shape)
     bad = np.where(np.isnan(f))  # get bad indices
     f[bad] = np.nanmedian(f)
-    if filter_type == 'median':
-        continuum = ndi.median_filter(f, filter_size)
-    elif filter_type == 'gaussian':
-        continuum = ndi.gaussian_filter(f, filter_size)
-    else:
-        raise ValueError(f"Filter type {filter_type} not recognized. Use 'median' or 'gaussian'.")
-    f = f - continuum
+    if subtract_continuum:
+        if filter_type == 'median':
+            continuum = ndi.median_filter(f, filter_size)
+        elif filter_type == 'gaussian':
+            continuum = ndi.gaussian_filter(f, filter_size)
+        else:
+            raise ValueError(f"Filter type {filter_type} not recognized. Use 'median' or 'gaussian'.")
+        f = f - continuum
     f[bad] = np.nan
     # print("----- done scaling -------")
     return f
@@ -91,7 +92,7 @@ class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
             
             d_wlen, d_flux, d_errors = np.array(data_spectrum.wlen,copy=True), np.array(data_spectrum.flux,copy=True), np.array(data_spectrum.errors,copy=True)
             assert len(d_wlen) == len(d_flux) == len(d_errors), f"Data wavelength ({len(d_wlen)}), flux ({len(d_flux)}), and error ({len(d_errors)}) arrays must be of the same length!"
-            model_fluxes = [scale_model_to_order(d_wlen, np.array(s.wlen,copy=True), np.array(s.flux,copy=True), self.filter_type, self.filter_size) for s in modeled_spectra]
+            model_fluxes = [scale_model_to_order(d_wlen, np.array(s.wlen,copy=True), np.array(s.flux,copy=True), self.filter_type, self.filter_size, subtract_continuum = not s.metadata.get("continuum_subtracted")) for s in modeled_spectra]
             bad_mask = np.logical_or.reduce([np.isnan(f) for f in model_fluxes])
             
             for (start_wlen, end_wlen) in self.masked_ranges:

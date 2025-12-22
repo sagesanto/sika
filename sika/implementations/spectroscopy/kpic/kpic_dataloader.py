@@ -114,7 +114,6 @@ def combine_star_spectrum(star_specs: drp_data.Dataset, fiber: str):
     return flux, e_flux
 
 
-# def load_crires_spectrum(data_file: str, wavelength_file: str, wavelen_range: tuple, filter_size:int, filter_type:str, bp_sigma:int, masked_ranges:List[Tuple[int,int]]=None) -> CRIRESSpectrum:
 def load_kpic_spectrum(
     data_dir: str,
     calib_dir: str,

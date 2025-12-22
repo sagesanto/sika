@@ -21,11 +21,12 @@ def arr_or_none(data: Optional[list]) -> Optional[np.ndarray]:
 
 @dataclass(kw_only=True)
 class KPICOrder(EchelleOrder):
-    def __init__(self,*args,orig_wlen:Optional[List[float]]=None,trace_sigmas:Optional[List[float]]=None,response_flux:Optional[List[float]]=None,**kwargs):
+    def __init__(self,*args,orig_wlen:Optional[List[float]]=None,trace_sigmas:Optional[List[float]]=None,response_flux:Optional[List[float]]=None,response_wlen:Optional[List[float]]=None,**kwargs):
         super().__init__(*args,**kwargs)
         self.orig_wlen = orig_wlen
         self.trace_sigmas = trace_sigmas
         self.response_flux = response_flux
+        self.response_wlen = response_wlen
 
 class KPICSpectrum(EchelleSpectrum):
     def __init__(self, wlen, flux, errors, 
@@ -132,13 +133,14 @@ class KPICSpectrum(EchelleSpectrum):
                     bp_sigma=bp_sigma,
                 )
             )
+            metadata["continuum_subtracted"] = True
 
-            
             order_spec = KPICOrder(
                 parameters={},
                 orig_wlen=np.array(self.orig_wlen[i]),
                 trace_sigmas=np.array(trace_sigmas)[o],
                 response_flux=np.array(self.response_flux[i]) if self.response_flux is not None else None,
+                response_wlen=np.array(self.response_wlen[i]) if self.response_wlen is not None else None,
                 order=o,
                 wlen=wlen_order,
                 flux=flux_order,
