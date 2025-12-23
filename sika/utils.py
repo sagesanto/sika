@@ -409,6 +409,67 @@ def get_process_info():
     pid = os.getpid()
     return pid, mem
 
+def compare_evidence_pymn(dir1, dir2):
+    from pymultinest.analyse import Analyzer
+    import pickle
+    from os.path import join, basename
+    import glob
+
+    # determine the number of params in each fit
+    n_params_1 = np.genfromtxt(join(dir1,"plot_chain.npy")).shape[1]
+    n_params_2 = np.genfromtxt(join(dir2,"plot_chain.npy")).shape[1]
+
+    # find the basename of each fit
+    summary_file_1 = glob.glob(join(dir1,"*summary.txt"))[0]
+    base1 = basename(summary_file_1).replace("summary.txt",'')
+    basepath_1 = join(dir1,base1)
+
+    summary_file_2 = glob.glob(join(dir2,"*summary.txt"))[0]
+    base2 = basename(summary_file_2).replace("summary.txt",'')
+    basepath_2 = join(dir2,base2)
+
+    analyzer1 = Analyzer(n_params=n_params_1, outputfiles_basename=basepath_1)
+    analyzer2 = Analyzer(n_params=n_params_2, outputfiles_basename=basepath_2)
+
+    logZ1 = analyzer1.get_stats()['global evidence']
+    logZerr1 = analyzer1.get_stats()['global evidence error']
+
+    logZ2 = analyzer2.get_stats()['global evidence']
+    logZerr2 = analyzer2.get_stats()['global evidence error']
+
+    logB21 = logZ2 - logZ1
+    logB21_err = (logZerr1**2 + logZerr2**2)**0.5
+    B21 = np.exp(logB21)
+    B21_err = np.exp(logB21_err)
+
+    print(f"logZ1 = {logZ1:.2f} ± {logZerr1:.2f}")
+    print(f"logZ2 = {logZ2:.2f} ± {logZerr2:.2f}")
+    print(f"log Bayes factor (Model 2 vs 1): {logB21:.2f} ± {logB21_err:.2f}")
+    print(f"Bayes factor (Model 2 vs 1): {B21:.2f} ± {B21_err:.2f}")
+
+    if B21 < 1:
+        favored, disfavored = 1,2
+    else:
+        favored, disfavored = 2,1
+    print(f"Model {favored} is favored over model {disfavored}.")
+
+    # log likes
+    # Load posterior samples with weights and log-likelihoods
+    samples1 = analyzer1.get_equal_weighted_posterior()
+    samples2 = analyzer2.get_equal_weighted_posterior()
+
+    # The log-likelihood is typically the last column
+    loglike1 = samples1[:, -1]
+    loglike2 = samples2[:, -1]
+
+    # Get the maximum log-likelihood (best fit)
+    max_loglike1 = np.max(loglike1)
+    max_loglike2 = np.max(loglike2)
+
+    print(f"Max log-likelihood (Model 1): {max_loglike1:.2f}")
+    print(f"Max log-likelihood (Model 2): {max_loglike2:.2f}")
+    
+    
 
 def compare_evidence(filename1, filename2):
     '''

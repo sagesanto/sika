@@ -1,7 +1,10 @@
 from .grid_companion_model import CompanionParameterSet, GridCompanionModel, PhoenixCompanionParameterSet, ElfOwlCompanionParameterSet, BTSettlCompanionParameterSet
 from .spectra.spectrum import Spectrum, EchelleOrder, EchelleSpectrum
 from .atmospheres import PMMRModel, PTModel, ElfOwl, CommonLogPressureGrid, CommonPressureGrid, ProfileVisualization
-from .pRT import pRT
+try:
+    from .pRT import pRT
+except:
+    pass
 from .composite_binary_model import Gl229BParameterSet, BinaryParameterSet, SimpleBinary, CompositeKBinary
 from .spectra.spectral_grid_interpolator import SpectralGridInterpolator
 from .spectra.middleware import PassbandRestrictor, PercentileScaler, KBandCoupler

@@ -123,7 +123,7 @@ class EchelleSpectrum:
         self.metadata = metadata or {}
     
     def add_order(self, order_idx: int, spectrum: EchelleOrder):
-        print(f"[ORDER {order_idx}] Adding spec: {spectrum}")
+        # print(f"[ORDER {order_idx}] Adding spec: {spectrum}")
         self.order_indices.append(order_idx)
         self.spectra.append(spectrum)
     

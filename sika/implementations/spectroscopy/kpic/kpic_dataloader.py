@@ -6,7 +6,7 @@ from enum import Enum
 import numpy as np
 import pandas as pd
 import warnings
-
+from astropy.io import fits
 from astropy import stats
 
 import kpicdrp
@@ -113,6 +113,17 @@ def combine_star_spectrum(star_specs: drp_data.Dataset, fiber: str):
     e_flux = combined_star_spec.errs[fiber_index]
     return flux, e_flux
 
+def load_response(response_file, fiber):
+    try:
+        spectral_responses = drp_data.Spectrum(filepath=response_file)
+        response_fiber_idx = spectral_responses.trace_index[fiber.lower()]
+        response_flux = spectral_responses.fluxes[response_fiber_idx, :]
+        response_wlen = spectral_responses.wvs[response_fiber_idx, :]
+    except KeyError:
+        with fits.open(response_file) as hdulist:
+            response_flux = hdulist[0].data
+            response_wlen = hdulist[1].data
+    return response_flux, response_wlen
 
 def load_kpic_spectrum(
     data_dir: str,
@@ -205,11 +216,7 @@ def load_kpic_spectrum(
     waves = wavecal_dat.wvs[wvs_ind]
 
     if response_file is not None:
-        # should load the response here
-        spectral_responses = drp_data.Spectrum(filepath=response_file)
-        response_fiber_idx = spectral_responses.trace_index[fiber.lower()]
-        response_flux = spectral_responses.fluxes[response_fiber_idx, :]
-        response_wlen = spectral_responses.wvs[response_fiber_idx, :]
+        response_flux, response_wlen = load_response(response_file, fiber)
     else:
         response_wlen = None
         response_flux = None
@@ -237,7 +244,6 @@ def load_kpic_spectrum(
 
 
 class KPICDataLoader(DataLoader[KPICOrder]):
-    
     def __init__(self, *args, normalize:bool=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.normalize = normalize
@@ -259,7 +265,7 @@ class KPICDataLoader(DataLoader[KPICOrder]):
             return response_file
 
         # if we weren't given an explicit path in the config, we were instead given the name of a response star and we need to go get the correct file
-        response_star = merged_cfg.get("response_star")
+        response_star = merged_cfg[night].get("response_star")
         if not response_star:
             raise ValueError(f"Tried to load response for target {target_name} on night {night} but couldn't find a 'response_file' or 'response_star' config key - one of the two must be provided.")
         
@@ -344,7 +350,7 @@ class KPICDataLoader(DataLoader[KPICOrder]):
                     flux_dir_extension=self.config['kpic'].get('flux_directory_name_format',"fluxes")
                 )
                 spectra.extend(s.spectra)
-        print(spectra)
+        # print(spectra)
         dims = []
         if len(nights) > 1:
             dims.append("night")
@@ -352,5 +358,5 @@ class KPICDataLoader(DataLoader[KPICOrder]):
             dims.append("fiber")
         if len(spectra) > len(nights) * len(fibers):
             dims.append("order")       
-        print(dims)     
+        # print(dims)     
         return Dataset(spectra, dims=dims)
