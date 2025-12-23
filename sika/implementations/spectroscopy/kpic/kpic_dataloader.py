@@ -127,7 +127,8 @@ def load_kpic_spectrum(
     normalize: bool = False,
     orders: Optional[List[int]] = None,
     response_file:Optional[str] = None,
-    metadata:Optional[Dict[str,Any]] = None
+    metadata:Optional[Dict[str,Any]] = None,
+    flux_dir_extension:Optional[str] = 'fluxes'
 ) -> KPICSpectrum:
     """Load a KPIC spectrum from file.
 
@@ -156,6 +157,8 @@ def load_kpic_spectrum(
     :type response_file: str
     :param metadata: a dictionary of metadata to attach to the loaded spectrum. spectra loaded by this function will always additionally have 'fiber', 'exposures', 'is_star', 'response_file', and 'data_dir' metadata attached
     :type metadata: Optional[dict[str,Any]]
+    :param flux_dir_extension: the name of the directory immediately above the exposure files. defaults to 'fluxes'. this is NOT the full path to the flux file directory!
+    :type flux_dir_extension: Optional[str]
     :rtype: KPICSpectrum
     """
 
@@ -167,9 +170,9 @@ def load_kpic_spectrum(
     
     # find the flux files for the requested exposures (if any)
     if exposures is None:
-        filelist = glob(join(data_dir, "fluxes", "*fits"))
+        filelist = glob(join(data_dir, flux_dir_extension, "*fits"))
     else:
-        filelist = [s for e in exposures for s in glob(join(data_dir, "fluxes", f"*{e}*fits"))]
+        filelist = [s for e in exposures for s in glob(join(data_dir, flux_dir_extension, f"*{e}*fits"))]
     # print(filelist)
     
     # load the dataset as a raw science dataset in order to later use the caldb
@@ -242,6 +245,45 @@ class KPICDataLoader(DataLoader[KPICOrder]):
     @property
     def provided_parameters(self) -> Dict[str, List[Any]]:
         return {"target": []}
+    
+    # torture
+    def find_response_file(self, merged_cfg, target_name, night, fiber):
+        kpic_base_science_dir = parse_path(self.config["kpic"]["data_dir"])
+        
+        explicit_filepath = merged_cfg[night].get("response_file")
+        night_data_dir = join(kpic_base_science_dir,target_name, night)
+        if explicit_filepath:
+            response_file = join(night_data_dir, explicit_filepath)
+            if not exists(response_file):
+                raise FileNotFoundError(f"Expected to find spectral responses for {target_name} on night {night} and fiber {fiber} in the file {response_file} but couldn't find it. Try confirming that the file is in the correct place, or adjusting the config")
+            return response_file
+
+        # if we weren't given an explicit path in the config, we were instead given the name of a response star and we need to go get the correct file
+        response_star = merged_cfg.get("response_star")
+        if not response_star:
+            raise ValueError(f"Tried to load response for target {target_name} on night {night} but couldn't find a 'response_file' or 'response_star' config key - one of the two must be provided.")
+        
+        response_dir_extension=self.config['kpic'].get('response_directory_name_format',"response")
+        response_dir = join(kpic_base_science_dir,response_star,night,response_dir_extension)
+        if not exists(response_dir):
+            raise FileNotFoundError(f"Expected to find spectral responses for {target_name} on night {night} in the directory {response_dir} but couldn't find it. Try confirming that the files are in the correct place, or adjusting the config")
+        response_fname = f"{night}_spec_response_{fiber}.fits" 
+        response_file = join(response_dir, response_fname)
+        
+        # fuckery
+        if not exists(response_file) and fiber.startswith('s'):
+            fiber_number = fiber[-1]
+            response_fname_guess = f"{night}_spec_response_sf{fiber_number}.fits"
+            guess_file = join(response_dir, response_fname_guess)
+            if not exists(guess_file):
+                raise FileNotFoundError(f"Expected to find spectral responses for {target_name} on night {night} and fiber {fiber} in the file {response_file} or {guess_file} but couldn't find either. Try confirming that the file is in the correct place, or adjusting the config")
+            response_file = guess_file
+            
+        elif not exists(response_file):
+            raise FileNotFoundError(f"Expected to find spectral responses for {target_name} on night {night} and fiber {fiber} in the file {response_file} but couldn't find it. Try confirming that the file is in the correct place, or adjusting the config")
+        
+        return response_file
+        
 
     def _call(self, parameters={}) -> Dataset[KPICOrder]:
         target_name = parameters.get("target", self.config["target"])
@@ -249,9 +291,7 @@ class KPICDataLoader(DataLoader[KPICOrder]):
         data_cfg = target_cfg["data"]
         merged_cfg = dict(data_cfg).copy()
         merged_cfg.update(parameters)
-        
-        
-        # wavelen_range = merged_cfg["wavelen_range"]
+                
         filter_size = merged_cfg["filter_size"]
         filter_type = merged_cfg["filter_type"]
         orders = merged_cfg.get("orders", None)
@@ -274,18 +314,19 @@ class KPICDataLoader(DataLoader[KPICOrder]):
             data_dir = join(basedir,n)
             assert exists(data_dir), f"Data directory {data_dir} does not exist."
             calib_dir = join(calib_basedir, n)
-            if not is_star:
-                response_file = join(data_dir, data_cfg[n]["response_file"])
-            else:
-                response_file = None
             exposure_num_cfg = merged_cfg[n]["exposures"]
             for fiber in fibers:
+                if not is_star:
+                    response_file = self.find_response_file(merged_cfg, target_name, n, fiber)
+                else:
+                    response_file = None
                 exposures = exposure_num_cfg.get(fiber)
                 if exposures is None:
                     raise ValueError(f"Tried to load data for {target_name} fiber '{fiber}' (night {n}) but no exposures for that fiber were specified in the {target_name}.data.{n}.exposures config section.")
                 
                 self.write_out(f"Loading data for target {target_name} from night {n}, fiber {fiber} in directory {data_dir}. is_star: {is_star}")
                 metadata = dict(target=target_name, display_name=parameters.get("display_name",target_cfg["display_name"]),night=n,fiber=fiber.lower(),directory=data_dir)
+
                 s = load_kpic_spectrum(
                     data_dir, 
                     calib_dir, 
@@ -299,10 +340,11 @@ class KPICDataLoader(DataLoader[KPICOrder]):
                     orders=orders,
                     response_file=response_file,
                     metadata=metadata,
-                    normalize=self.normalize
+                    normalize=self.normalize,
+                    flux_dir_extension=self.config['kpic'].get('flux_directory_name_format',"fluxes")
                 )
                 spectra.extend(s.spectra)
-        print(spectra)        
+        print(spectra)
         dims = []
         if len(nights) > 1:
             dims.append("night")

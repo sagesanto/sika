@@ -1,5 +1,6 @@
 from typing import TypeVar
 import numpy as np
+import matplotlib.pyplot as plt
 
 from kpicdrp.xcorr import convolve_and_sample
 
@@ -73,15 +74,40 @@ class KPICModel(CompositeModel[Spectrum]):
         kpic_models = []
         for sel, kpic_spec in self.data:
             model = model_set.values(sel).copy()
-            
+            # wlen_min, wlen_max = min(kpic_spec.wlen), max(kpic_spec.wlen)
+            # fig, axes = plt.subplots(nrows=4, figsize=(20,7),sharex=True)
+            # fig.tight_layout()
+            # fig.suptitle(f"{self.name} - {sel}",y=1.07)
+            # m_w, m_f = np.copy(model.wlen), np.copy(model.flux)  # get a copy of original model vals for plotting
+      
             # in keeping with kpic DRP forward model (https://github.com/kpicteam/kpic_pipeline/blob/main/kpicdrp/xcorr.py#L360),
             # we normalize flux, convolve to data resolution using the LSF,
             # align to the data grid, and then normalize again (because convolution does not conserve flux):
             model.normalize(percentile=90)  # normalize
             model = model_to_kpic_grid(model, kpic_spec)  # convolve and align
             model.normalize(percentile=90)  # normalize
+            # ax = axes[1]
+            # ax.set_title("Aligned to KPIC Grid")
+            # ax.plot(model.wlen,model.flux)
+            
+            # # now plot the original model
+            # ax = axes[0]
+            # ax.set_title("Original Model")
+            # mask = (m_w > min(model.wlen)) & (m_w < max(model.wlen)) 
+            # ax.plot(m_w[mask], m_f[mask])
+            
+            # ax = axes[2]
+            # ax.set_title("KPIC Response")
+            # ax.plot(kpic_spec.response_wlen,kpic_spec.response_flux)
+            
             model = apply_kpic_response(model, kpic_spec)  # apply response
+            # ax = axes[3]
+            # ax.set_title("Response Applied to Model")
+            # ax.plot(model.wlen,model.flux)
             model.metadata.update(sel)  # so that the dataset knows what fiber/night/etc this spectrum corresponds to
+                        
+            # plt.show()
+            # plt.close() 
             kpic_models.append(model)
             
         return Dataset(kpic_models, dims=self.data.dims)

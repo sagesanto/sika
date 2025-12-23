@@ -1,7 +1,6 @@
 from os.path import join, abspath, expanduser
 import numpy as np
 import xarray
-import petitRADTRANS.chemistry.utils as chemutils
 from typing import Tuple
 
 from sika.provider import Provider
@@ -11,6 +10,11 @@ from .profiles import PMMRModel, PTModel
 class ElfOwl(Provider[Tuple[PTModel,PMMRModel]]):
     """Generate (load) a pressure-temperature profile and a volume mixing ratio profile from Elf Owl"""
 
+    def __init__(self,*args,**kwargs):
+        import petitRADTRANS.chemistry.utils as chemutils
+        self.chemutils = chemutils
+        super().__init__(*args,**kwargs)
+    
     @property
     def provided_parameters(self):
         # return {
@@ -81,10 +85,10 @@ class ElfOwl(Provider[Tuple[PTModel,PMMRModel]]):
             vmr_dict_elfowl[spe] = ds[spe].values
         # delete electron
         # del vmr_dict_elfowl['e-']
-        elfowl_mmw = chemutils.compute_mean_molar_masses_from_volume_mixing_ratios(
+        elfowl_mmw = self.chemutils.compute_mean_molar_masses_from_volume_mixing_ratios(
             vmr_dict_elfowl
         )
-        mass_fractions = chemutils.volume_mixing_ratios2mass_fractions(
+        mass_fractions = self.chemutils.volume_mixing_ratios2mass_fractions(
             vmr_dict_elfowl, mean_molar_masses=elfowl_mmw
         )
 
