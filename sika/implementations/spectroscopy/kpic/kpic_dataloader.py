@@ -90,8 +90,10 @@ def combine_planet_spectrum(planet_specs: drp_data.Dataset, fiber: str):
 
     # determine where the data for our fiber is
     science_fiber_indices = planet_specs[0].trace_index
-    sci_fiber_idx = science_fiber_indices[fiber.lower()]
-
+    try:
+        sci_fiber_idx = science_fiber_indices[fiber.lower()]
+    except KeyError as e:
+        raise KeyError(f"Couldn't find fiber {fiber.lower()} in planet spectrum. Trace index: {science_fiber_indices}") from e
     # select the flux and err for our fiber
     all_flux = all_trace_flux[:, sci_fiber_idx, :, :]
     all_e_flux = all_trace_e_flux[:, sci_fiber_idx, :, :]
@@ -106,10 +108,13 @@ def combine_planet_spectrum(planet_specs: drp_data.Dataset, fiber: str):
 
 def combine_star_spectrum(star_specs: drp_data.Dataset, fiber: str):
     combined_star_spec = kpicdrp.utils.stellar_spectra_from_files(star_specs)
-    fiber_index = combined_star_spec.trace_index[fiber.lower()]
+    try:
+        fiber_index = combined_star_spec.trace_index[fiber.lower()]
+    except KeyError as e:
+        raise KeyError(f"Couldn't find fiber {fiber.lower()} in star spectrum. Trace index: {combined_star_spec.trace_index}") from e
     flux = combined_star_spec.fluxes[
         fiber_index
-    ]  # should always be 0, since I only load files for 1 single fiber
+    ]
     e_flux = combined_star_spec.errs[fiber_index]
     return flux, e_flux
 
@@ -202,8 +207,12 @@ def load_kpic_spectrum(
         trace_dat = trace_caldb.get_calib(raw_sci_dataset[0])
     except Exception as e:
         trace_dat = load_trace_manual(calib_dir)
-    trace_ind = trace_dat.trace_index[fiber.lower()]
-    trace_sigmas = trace_dat.widths[trace_ind]
+    
+    try:
+        trace_ind = trace_dat.trace_index[fiber.lower()]
+        trace_sigmas = trace_dat.widths[trace_ind]
+    except KeyError as e:
+        raise KeyError(f"Couldn't find fiber {fiber.lower()} in trace. Trace index: {trace_dat.trace_index}") from e
 
     # load wavecal
     try:
@@ -212,8 +221,11 @@ def load_kpic_spectrum(
         wavecal_dat = load_wavecal_manual(calib_dir)
 
     # get the wavecal's wavelength arrays
-    wvs_ind = wavecal_dat.trace_index[fiber.lower()]
-    waves = wavecal_dat.wvs[wvs_ind]
+    try:
+        wvs_ind = wavecal_dat.trace_index[fiber.lower()]
+        waves = wavecal_dat.wvs[wvs_ind]
+    except KeyError as e:
+        raise KeyError(f"Couldn't find fiber {fiber.lower()} in wavecal. Trace index: {wavecal_dat.trace_index}") from e
 
     if response_file is not None:
         response_flux, response_wlen = load_response(response_file, fiber)

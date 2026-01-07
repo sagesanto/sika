@@ -42,7 +42,10 @@ docs = [
 ]
 spectroscopy = [
     "astropy",
-    "petitRADTRANS"
+    "petitRADTRANS",
+    "requests",
+    "h5py",
+    "paramiko"
 ]
 test = [
     "pytest"

@@ -16,6 +16,7 @@ import numpy as np
 import matplotlib.lines as mlines
 import pandas as pd
 import tqdm
+from scipy.interpolate import interp1d
 
 from sika.utils import parse_path, write_out
 from sika.config import Config
@@ -307,17 +308,49 @@ def clean_and_continuum_subtract(fluxes, wavelengths, errors, bp_sigma=3, filter
     wavelengths = np.delete(wavelengths, spike_inds)
     fluxes = np.delete(fluxes, spike_inds)
     errors = np.delete(errors, spike_inds)
+    
+    f, norm_constant = continuum_subtract(fluxes, filter_size, filter_type)
+    
+    return f, wavelengths, errors, norm_constant
+
+def continuum_subtract(flux,filter_size,filter_type='median'):
+    f = np.copy(flux)
+    bad = np.where(np.isnan(f))  # get bad indices
+    f[bad] = np.nanmedian(f)
     if filter_type == 'median':
-        continuum = ndi.median_filter(fluxes, filter_size)
+        continuum = ndi.median_filter(f, filter_size)
     elif filter_type == 'gaussian':
-        continuum = ndi.gaussian_filter(fluxes, filter_size)
+        continuum = ndi.gaussian_filter(f, filter_size)
     else:
         raise ValueError("filter_type must be 'median' or 'gaussian'")
-
     norm_constant = np.nanmedian(continuum)
-    # May 21, 2024 - do not add the constant factor back anymore 
-    fluxes = fluxes - continuum
-    return fluxes, wavelengths, errors, norm_constant
+    f = f - continuum
+    f[bad] = np.nan
+    return f, norm_constant
+
+def run_ccf(flux, wlen, err, w_model, f_model, v_extent, dv, filter_type='median', filter_size=150, symmetric=False):
+    from astropy import constants as const
+    f_cont, _ = continuum_subtract(flux,filter_size, filter_type)
+    f_model_cont, _ = continuum_subtract(f_model,filter_size, filter_type)
+    v_grid = np.arange(0, v_extent+dv, dv)
+    if symmetric:
+        v_grid = np.arange(-v_extent, v_extent+dv, dv)
+    # print(w_model.shape)
+    # print(f_model_cont.shape)
+    interp = interp1d(w_model, f_model_cont, bounds_error=False, fill_value=0)
+    # plt.plot(dt.wave, dt.flux)
+    # plt.show()
+    ccf = []
+    templates = []
+    for k, v_shift in enumerate(v_grid):
+        beta =  v_shift/const.c.to("km/s").value
+        # w_shift = dt.wave * (1. - beta)
+        w_shift = wlen * np.sqrt((1 - beta)/(1 + beta))
+        f_template = interp(w_shift)
+        # templates.append((f_model,w_shift))
+        ccf.append(np.dot(f_template, f_cont/err**2.))
+
+    return v_grid, np.array(ccf), np.array(templates)
 
 class KBandLossAdjustment:
     """Contributes a penalty term for deviation from the observed k-band flux to the loss of a binary model. This is very simple to implement and pretty specific in its expectation of the metadata structure of the model. It's probably easier to write a new one for your specific use case than to try to conform to this one."""

@@ -186,7 +186,7 @@ def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_tit
                 overplot_samp=np.array([]), overplot_samp3=np.array([]), overplot_samp4=np.array([]),
                 overplot_samp5=np.array([]), overplot_samp6=np.array([]),  overplot_samp7=np.array([]), range_list=None, show_title = True, quantiles=(0.16,0.5,0.84),
                 plot_calc_m=False, mode='gpi', weights_list=[], plot_labels=[], fs=27.5, fs2=25, levels = (1-np.exp(-0.5),),
-                 c_list=['xkcd:cerulean', 'xkcd:tomato', 'xkcd:purple', 'xkcd:goldenrod', 'gray', 'teal', 'green'], max_n_ticks=5, plot_datapoints=False):
+                c_list=['xkcd:cerulean', 'xkcd:tomato', 'xkcd:purple', 'xkcd:goldenrod', 'gray', 'teal', 'green'], max_n_ticks=5, plot_datapoints=False):
     
     if len(overplot_vals) > 0:
         overplot = overplot_vals
@@ -197,9 +197,9 @@ def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_tit
     num_samples = len(plot_labels)
     smooth = True
     fig = corner.corner(plot_chain, range=range_list,
-                   figsize=(10,10), bins=30, density=True, truths=overplot, truth_color='black',
-                  quantiles=quantiles, labels=labels_all, show_titles=show_title, titles=unitless_titles,
-                  smooth=smooth, color=c_list[0], levels=levels, contour_kwargs={'linestyles': 'dashed'},
+                figsize=(10,10), bins=30, density=True, truths=overplot, truth_color='black',
+                quantiles=quantiles, labels=labels_all, show_titles=show_title, titles=unitless_titles,
+                smooth=smooth, color=c_list[0], levels=levels, contour_kwargs={'linestyles': 'dashed'},
                     title_kwargs={"fontsize": fs}, label_kwargs=dict(fontsize=fs2), max_n_ticks=max_n_ticks,
                     title_fmt=".2f", plot_datapoints=plot_datapoints)
     
@@ -226,14 +226,14 @@ def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_tit
         else:
             this_weight = weights_list[0]
         corner.corner(overplot_samp, color=c_list[1], smooth=smooth, bins=30, density=True, contour_kwargs={'linestyles': 'dashed'},
-                       fig=fig, levels=(1-np.exp(-0.5),), weights=this_weight, range=range_list, plot_datapoints=plot_datapoints)
+                    fig=fig, levels=(1-np.exp(-0.5),), weights=this_weight, range=range_list, plot_datapoints=plot_datapoints)
     if overplot_samp3.shape[0] > 0:
         if len(weights_list) == 0:
             this_weight = None
         else:
             this_weight = weights_list[1]
         corner.corner(overplot_samp3, color=c_list[2], smooth=smooth, bins=30, density=True, contour_kwargs={'linestyles': 'dashed'},
-                      fig=fig, levels=(1 - np.exp(-0.5),), weights=this_weight, range=range_list, plot_datapoints=plot_datapoints)
+                    fig=fig, levels=(1 - np.exp(-0.5),), weights=this_weight, range=range_list, plot_datapoints=plot_datapoints)
 
     if overplot_samp4.shape[0] > 0:
         if len(weights_list) == 0:
@@ -241,8 +241,8 @@ def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_tit
         else:
             this_weight = weights_list[2]
         corner.corner(overplot_samp4, color=c_list[3], bins=30, density=True, contour_kwargs={'linestyles': 'dashed'},
-                      alpha=0.8, smooth=smooth, weights=this_weight, range=range_list, plot_datapoints=plot_datapoints,
-                      fig=fig, levels=(1 - np.exp(-0.5),))
+                    alpha=0.8, smooth=smooth, weights=this_weight, range=range_list, plot_datapoints=plot_datapoints,
+                    fig=fig, levels=(1 - np.exp(-0.5),))
 
     if overplot_samp5.shape[0] > 0:
         if len(weights_list) == 0:
@@ -250,8 +250,8 @@ def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_tit
         else:
             this_weight = weights_list[3]
         corner.corner(overplot_samp5, color=c_list[4], bins=30, density=True, contour_kwargs={'linestyles': 'dashed'},
-                      alpha=0.8, smooth=smooth, weights=this_weight, range=range_list,
-                      fig=fig, levels=(1 - np.exp(-0.5),), plot_datapoints=plot_datapoints)
+                    alpha=0.8, smooth=smooth, weights=this_weight, range=range_list,
+                    fig=fig, levels=(1 - np.exp(-0.5),), plot_datapoints=plot_datapoints)
 
 
     if overplot_samp6.shape[0] > 0:
@@ -260,8 +260,8 @@ def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_tit
         else:
             this_weight = weights_list[4]
         corner.corner(overplot_samp6, color=c_list[5], bins=30, density=True, contour_kwargs={'linestyles': 'dashed'},
-                      alpha=0.8, smooth=smooth, weights=this_weight, range=range_list,
-                      fig=fig, levels=(1 - np.exp(-0.5),), plot_datapoints=plot_datapoints)
+                    alpha=0.8, smooth=smooth, weights=this_weight, range=range_list,
+                    fig=fig, levels=(1 - np.exp(-0.5),), plot_datapoints=plot_datapoints)
 
     if overplot_samp7.shape[0] > 0:
         if len(weights_list) == 0:
@@ -269,8 +269,8 @@ def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_tit
         else:
             this_weight = weights_list[5]
         corner.corner(overplot_samp7, color=c_list[6], bins=30, density=True, contour_kwargs={'linestyles': 'dashed'},
-                      alpha=0.8, smooth=smooth, weights=this_weight, range=range_list,
-                      fig=fig, levels=(1 - np.exp(-0.5),), plot_datapoints=plot_datapoints)
+                    alpha=0.8, smooth=smooth, weights=this_weight, range=range_list,
+                    fig=fig, levels=(1 - np.exp(-0.5),), plot_datapoints=plot_datapoints)
 
 
     if len(plot_labels) > 0:
@@ -340,16 +340,21 @@ def groupby(group_by: List[str], ds:xr.Dataset, flatten=False):
     flat = ds.stack(flat_index=dims)
     df = flat.to_dataframe()
     grouped = df.groupby(group_by)
-
+    # print("grouped:",grouped)
     for group_vals, group_df in grouped:
+        # print("----")
         if not isinstance(group_vals, tuple):
             group_vals = (group_vals,)
+        # print("group_vals:",group_vals)
         sg = dict(zip(group_by, group_vals))
+        # print("sg:",sg)
+        # print("group_df:",group_df)
         if flatten:
             coords = []
             vals = []        
             for _, row in group_df.iterrows():
-                coords.append({d: row[d] for d in ds.dims})
+                coords.append(dict(zip(group_df.index.names, row.name)))
+                # coords.append({d: row[d] for d in ds.dims})
                 vals.append({p: row[p] for p in other_params})
             yield sg, coords, vals
         else:
@@ -364,7 +369,6 @@ def groupby(group_by: List[str], ds:xr.Dataset, flatten=False):
             else:
                 subset = ds.sel({var: val for var, val in zip(group_by, group_vals)})
                 yield sg, subset[other_params]
-
 
 
 # this wants to be with the hypothetical NDimData class

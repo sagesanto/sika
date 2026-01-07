@@ -245,6 +245,10 @@ class Dataset(Generic[T], ABC):
         """
         for (x) in joint_iter_generic(*[d.as_xarray() for d in datasets]):
             yield x
+            
+    def __repr__(self) -> str:
+        v = self.values(self.selectors[0])
+        return f"Dataset({v.__class__.__name__},coords={self.coords},dims={self.dims})"
 
 def joint_iter(*datasets: Dataset):
     for (x) in joint_iter_generic(*[d.as_xarray() for d in datasets]):
