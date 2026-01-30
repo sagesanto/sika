@@ -50,7 +50,7 @@ class BinaryRVSampler(Sampler[BinaryRV, BinaryRV]):
         all_errors, all_residuals = [], []
         for sel, data in self.data:
             modeled_rv = modeled_ds.values(sel)
-            jitter = self.aux_params.jitter.values(sel)
+            jitter = self.aux_param_sets[0].jitter.values(sel)
             rv_jitter = np.ones_like(data.rv1.rv) * jitter
             err_1 = np.sqrt(data.rv1.rv_err**2 + rv_jitter**2)
             err_2 = np.sqrt(data.rv2.rv_err**2 + rv_jitter**2)

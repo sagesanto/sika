@@ -1,6 +1,7 @@
+import os
+from os.path import join, exists, abspath, expanduser
 import numpy as np
 import requests
-import os
 from astropy.io import fits
 import warnings
 from io import BytesIO
@@ -59,10 +60,41 @@ def download_PHOENIX_stellar_model(teff, logg, url='https://phoenix.astro.physik
 
 class Phoenix(Provider[Spectrum]):
     def _setup(self):
+        self.setup_config()
         self.url = self.config["phoenix"]["url"]
         self.model_dir = self.config["phoenix"]["model_dir"]
         self.wave_file = self.config["phoenix"]["wave_file"]
-        self.wlen = fits.getdata(self.wave_file) / 1e4 # to micron
+        os.makedirs(self.model_dir,exist_ok=True)
+        self.wlen = self.get_wave()
+    
+    def setup_config(self):
+        default_model_dir = os.path.join(abspath(expanduser(self.config['filestore'])),"spectral_models",'phoenix')
+        default_url = 'https://phoenix.astro.physik.uni-goettingen.de/data/v2.0/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-0.0/'
+        default_wave_file = "WAVE_PHOENIX-ACES-AGSS-COND-2011.fits"
+        if not self.config.get("phoenix"):
+            self.config["phoenix"] = {'model_dir':default_model_dir, 'url': default_url, 'wave_file': os.path.join(default_model_dir, default_wave_file) }    
+        if not self.config['phoenix'].get('model_dir'):
+            self.config['phoenix']['model_dir'] = default_model_dir
+        if not self.config['phoenix'].get('url'):
+            self.config['phoenix']['url'] = default_url
+        if not self.config['phoenix'].get('wave_file'):
+            self.config['phoenix']['wave_file'] = join(self.config['phoenix']['model_dir'],default_wave_file)
+        self.config.save()
+        
+
+    def get_wave(self):
+        if not exists(self.wave_file):
+            self.write_out("Retrieving PHOENIX wave file")
+            r = requests.get("https://phoenix.astro.physik.uni-goettingen.de/data/HiResFITS/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits", timeout=10)
+            try:
+                r.raise_for_status()
+            except requests.exceptions.HTTPError as err:
+                raise RuntimeError(f"Failed to download a Phoenix wavefile: {err}") from err
+            
+            with open(self.wave_file, "wb+") as f:
+                f.write(r.content)
+    
+        return fits.getdata(self.wave_file) / 1e4 # to micron
     
     @property
     def provided_parameters(self):

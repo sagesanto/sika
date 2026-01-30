@@ -73,6 +73,20 @@ def test_values_1d():
     for i, c_v in enumerate(coord_v):
         val = p.values({"a":c_v})
         assert val == i
-    
+        
+@pytest.mark.params
+def test_set_from_flat():
+    coord_v = ["a","b","c","d"]
+    coords = {"a":coord_v}
+    vals = [0,1,2,3]
+    p = Parameter("A", NullPriorTransform(), varies_with=["a"], coords=coords)
+    p.set_from_flat(vals)
+    contents = [(s,v) for s,v in p]
+    assert len(contents) == len(coord_v)
+    for i, (sel, val) in enumerate(contents):
+        assert val == i
+        assert sel['a'] == coord_v[i]
+
+
 if __name__ == "__main__":
     pytest.main()
