@@ -47,13 +47,15 @@ class NodeSpec:
     
     def __repr__(self) -> str:
         return str((self.label,self.color,self.ID))
-        
-        
-def visualize_graph(nodes, title:str|None,fig:Figure|None=None,ax:Axes|None=None) -> tuple[Figure, Axes]:
-    from networkx.drawing.nx_agraph import graphviz_layout
+
+def visualize_graph(nodes, title: str | None, fig: Figure | None = None, ax: Axes | None = None) -> tuple[Figure, Axes]:
+    import tempfile
+    import matplotlib.image as mpimg
     import networkx as nx
-    
+    from networkx.drawing.nx_agraph import to_agraph
+
     G = nx.DiGraph()
+
     def add_nodes_and_edges(node, edges):
         G.add_node(node)
         for edge, sub_edges in edges.items():
@@ -65,8 +67,6 @@ def visualize_graph(nodes, title:str|None,fig:Figure|None=None,ax:Axes|None=None
         add_nodes_and_edges(node, edges)
 
     for node in G.nodes:
-        G.nodes[node]['color'] = node.color
-        G.nodes[node]['shape'] = "plaintext"
         label = node.label[0]
         for i in range(1, len(node.label)):
             c = node.label[i]
@@ -74,49 +74,31 @@ def visualize_graph(nodes, title:str|None,fig:Figure|None=None,ax:Axes|None=None
                 label += "\n" + c
             else:
                 label += c
-        node.label= label
-        G.nodes[node]['label'] =node.label        
-        
-    # top_node = list(nodes.keys())[0]
-    # initial_positions = {n:(0,-n.depth) for n in G.nodes}
-    
-    # next_layer = list(nodes[top_node].keys())
-    # for i, node in enumerate(next_layer):
-    #     initial_positions[node] = (-1, (-0.5+i/len(next_layer))*len(next_layer))
-    
-    pos = graphviz_layout(G, prog="dot", args="-Grankdir=RL")
-    
+
+        G.nodes[node]["label"] = label
+        G.nodes[node]["shape"] = "box"
+        G.nodes[node]["style"] = "filled"
+        G.nodes[node]["fillcolor"] = node.color
+        G.nodes[node]["color"] = "black"
+
+    A = to_agraph(G)
+    A.graph_attr.update(rankdir="RL",ranksep="0.8",nodesep='0.5')
+    A.edge_attr.update(tailport="w", headport="e", dir='back')
+    A.node_attr.update(fontname="DejaVu Sans", fontsize="16")
+
     if fig is None or ax is None:
         fig, ax = plt.subplots()
-        
-    nx.draw_networkx_edges(
-        G,
-        pos=pos,
-        ax=ax,
-        arrows=True,
-        arrowstyle="-",
-        node_shape="s",
-    )
 
-    tr_figure = ax.transData.transform
-    tr_axes = fig.transFigure.inverted().transform
+    with tempfile.NamedTemporaryFile(suffix=".png") as tmp:
+        A.draw(tmp.name, prog="dot")
+        img = mpimg.imread(tmp.name)
+        ax.imshow(img)
+        ax.axis("off")
 
-    icon_size = (ax.get_xlim()[1] - ax.get_xlim()[0]) * 0.05
-    icon_center = icon_size / 2.0
-
-    for n in G.nodes:
-        xf, yf = tr_figure(pos[n])
-        xa, ya = tr_axes((xf, yf))
-        a = plt.axes([xa - icon_center, ya - icon_center, icon_size, icon_size])
-        a.text(
-            0.5,0.5, G.nodes[n]["label"], fontsize=10, ha='center', va='center', transform=a.transAxes, bbox=dict(facecolor=G.nodes[n]["color"], alpha=1)
-        )
-        a.axis("off")
-    ax.axis("off")
     if title is not None:
-        ax.set_title(title, fontsize=16)
-    return fig, ax
+        ax.set_title(title, fontsize=18,y=1.1)
 
+    return fig, ax
 
 @contextmanager
 def suppress_stdout(enabled=True):
@@ -339,7 +321,11 @@ def groupby(group_by: List[str], ds:xr.Dataset, flatten=False):
 
     flat = ds.stack(flat_index=dims)
     df = flat.to_dataframe()
-    grouped = df.groupby(group_by)
+    groupers = [
+        df.index.get_level_values(key) if key in df.index.names else df[key]
+        for key in group_by
+    ]
+    grouped = df.groupby(groupers, sort=False)
     # print("grouped:",grouped)
     for group_vals, group_df in grouped:
         # print("----")

@@ -192,7 +192,7 @@ def joint_iter(*param_sets: ParameterSet):
 class EmptyParameterSet(ParameterSet):
     def __init__(self):
         self.name = "empty"
-        self.params = {}
+        self.params = []
         self.unfrozen = []
         self.frozen = []
         self.setup()

@@ -16,6 +16,7 @@ def solve_keplers_equation(M, e, tol=1e-10):
 # Keplerian function
 # tau between 0 and 1 as fraction of orbit
 def keplerian_function(t, amplitude, period, eccentricity, omega, tau, offset):
+    # should just convert period from days to seconds here instead of doing it before
     mean_anomaly = 2 * np.pi * (t - tau*period) / period
     mean_anomaly %= 2 * np.pi
     eccentric_anomaly = np.array(_calc_ecc_anom(mean_anomaly,eccentricity,max_iter=1000))

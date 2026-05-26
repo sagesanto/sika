@@ -136,7 +136,7 @@ class Normal(PriorTransform):
         :type mean: float
         :param std: the standard deviation of the distribution
         :type std: float
-        :param bounds: if provided, the prior will use a truncated normal distribution and will only draw vlaues within ``bounds``, defaults to None
+        :param bounds: if provided, the prior will use a truncated normal distribution and will only draw values within ``bounds``, defaults to None
         :type bounds: Optional[Tuple[float,float]], optional
         """
         self.mean = mean

@@ -34,11 +34,24 @@ class Spectrum(DFProduct):
         if self.errors is None:
             self.errors = np.zeros_like(self.flux)
 
-    def clip_to_wlen_bounds(self, min_wlen, max_wlen):
-        mask = (self.wlen >= min_wlen) & (self.wlen <= max_wlen)
-        self.wlen = self.wlen[mask]
-        self.flux = self.flux[mask]
-        return self
+    def clip_to_wlen_bounds(self, min_wlen, max_wlen, inplace=True):
+        mask = (self.wlen_flat >= min_wlen) & (self.wlen_flat <= max_wlen)
+        
+        clipped_wlen = self.wlen_flat[mask]
+        clipped_flux = self.flux_flat[mask]
+        if self.errors is not None:
+            clipped_errors = self.errors_flat[mask]
+        else:
+            clipped_errors = None
+        if inplace:
+            self.wlen = clipped_wlen
+            self.flux = clipped_flux
+            self.errors = clipped_errors
+            return self
+        else:
+            md = self.metadata.copy()
+            md['clipped_wlen'] = (min_wlen,max_wlen)
+            return Spectrum(self.parameters,md,wlen=clipped_wlen,flux=clipped_flux,errors=clipped_errors)
     
     def normalize(self,percentile=90):
         """ Divide this spectrum's flux (and error) by its `percentile` percentile inplace"""

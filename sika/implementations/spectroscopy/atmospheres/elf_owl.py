@@ -44,7 +44,7 @@ class ElfOwl(Provider[Tuple[PTModel,PMMRModel]]):
         }
 
     def _call(self, parameters):
-        teff, grav, mh, co, logkzz = tuple(parameters.values())
+        teff, grav, mh, co, logkzz = map(float, tuple(parameters.values()))
         assert (
             len(parameters) == 5
         ), "ElfOwl requires 5 parameters: teff, grav, mh, co, logkzz"
