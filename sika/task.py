@@ -22,7 +22,7 @@ class Task:
         :param prev: a `Task` that immediately precedes this one, defaults to None
         :type prev: Union[Task,None], optional
         """
-        self.config = config
+        self.config:Config = config
         self.logger = logger
         self.prev = prev
         self.ID = uuid.uuid4().hex  # unique identifier for this task instance

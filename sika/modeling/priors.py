@@ -24,6 +24,13 @@ class PriorTransform(ABC):
         """
         Transform a variable from the prior space to the parameter space.
         """
+        
+    @property
+    @abstractmethod
+    def scale(self) -> float:
+        """Returns the characteristic scale of the prior, if one exists (else None). For use in determining MCMC perturbation size
+        :rtype: float
+        """
 
     @abstractmethod
     def _to_dict(self) -> Dict[str, Any]:
@@ -56,6 +63,13 @@ class PriorTransform(ABC):
     def dispname(self) -> str:
         """Return a display name for the distribution. Can use LaTex."""
 
+    @abstractmethod
+    def log_prior(self, value: float) -> float:
+        """
+        Return the log prior probability of a value. This is only implemented for some prior transforms.
+        """
+
+
     # @abstractmethod
     # def log_prior(self, value: float) -> float:
     #     """
@@ -75,14 +89,19 @@ class NullPriorTransform(PriorTransform):
     def _to_dict(self):
         return {}
     
+    @property
+    def scale(self) -> float:
+        """Returns the characteristic scale of the prior, if one exists (else None). For use in determining MCMC perturbation size """
+        raise NotImplementedError("NullPriorTransform does not implement scale")
+    
     def empirical_pdf(self):
         raise NotImplementedError("NullPriorTransform does not implement empirical_pdf")
     
     def dispname(self):
         raise NotImplementedError("NullPriorTransform does not implement dispname")
     
-    # def log_prior(self, value: float) -> float:
-    #     raise NotImplementedError("NullPriorTransform does not implement log_prior")
+    def log_prior(self, value: float) -> float:
+        raise NotImplementedError("NullPriorTransform does not implement log_prior")
 
 
 class Uniform(PriorTransform):
@@ -122,8 +141,13 @@ class Uniform(PriorTransform):
         y = self.distr.pdf(x)
         return np.c_[x,y].T
         
-    # def log_prior(self, value: float) -> float:
-    #     return 
+    def log_prior(self, value: float) -> float:
+        return self.distr.logpdf(value)
+    
+    @property
+    def scale(self) -> float:
+        """Returns the characteristic scale of the prior, in this case b-a. For use in determining MCMC perturbation size """
+        return self.max_val - self.min_val
 
 
 class Normal(PriorTransform):
@@ -171,3 +195,11 @@ class Normal(PriorTransform):
 
     def _call(self,var:float) -> float:
         return self.distr.ppf(var)
+    
+    def log_prior(self, value: float) -> float:
+        return self.distr.logpdf(value)
+    
+    @property
+    def scale(self) -> float:
+        """Returns the characteristic scale of the prior, in this case its standard deviation. For use in determining MCMC perturbation size """
+        return self.std

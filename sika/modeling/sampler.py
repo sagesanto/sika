@@ -34,7 +34,7 @@ M = TypeVar('M', bound=Product, covariant=True)  # type of the model Product
 class Sampler(Generic[D,M], Task, ABC):
     """ Base class for samplers that fit models to data using a likelihood function. """
     
-    supported_samplers = ['dynesty', "pymultinest"]
+    supported_samplers = ['dynesty', "pymultinest", "emcee"]
 
     def __init__(self, run_prefix:str, outdir, data: Union[Dataset[D], DataLoader[D]], models: List[Model[M]], *args, loss=LnLikelihood(), data_params: Optional[Dict] = None, restore_from: Optional[str]=None, constraints: Optional[List[Constraint]]=None, aux_params:Optional[AuxiliaryParameterSet]=None, **kwargs):
         """Initialize the Sampler.
@@ -69,6 +69,7 @@ class Sampler(Generic[D,M], Task, ABC):
         self.loss = loss
         self.sampler = None
         self.restore_from = restore_from
+        self.mcmc_starting_guess = None
         self._data_params = data_params if data_params else {}
         self.loss_adjustments = []
         if isinstance(data, Dataset):
@@ -83,6 +84,7 @@ class Sampler(Generic[D,M], Task, ABC):
     
     @property
     def params(self):
+        """A list of the unfrozen parameters of each model and auxiliary parameter set"""
         return [p for model in self.models for p in model.params] + [p for pset in self.aux_param_sets for p in pset.unfrozen]
     
     @property
@@ -93,6 +95,7 @@ class Sampler(Generic[D,M], Task, ABC):
         
     @property
     def param_names(self):
+        """A list of the names of the unfrozen parameters of each model and auxiliary parameter set, including coordinate variants"""
         n = []
         for model in self.models:
             n.extend(model.param_names)
@@ -102,6 +105,7 @@ class Sampler(Generic[D,M], Task, ABC):
     
     @property
     def short_param_names(self):
+        """A list of the names of the unfrozen parameters of each model and auxiliary parameter set, excluding coordinate variants"""
         n = []
         for model in self.models:
             n.extend(model.short_param_names)
@@ -111,6 +115,7 @@ class Sampler(Generic[D,M], Task, ABC):
     
     @property
     def parameter_sets(self) -> List[ParameterSet]:
+        """A list containing the parameter sets of each model, plus each auxiliary parameter set"""
         psets = []
         for m in self.models:
             psets.extend(m.parameter_sets)
@@ -136,6 +141,7 @@ class Sampler(Generic[D,M], Task, ABC):
         args["restore_from"] = self.restore_from
         args["constraints"] = self.constraints
         args["aux_params"] = self.aux_param_sets
+        args["mcmc_starting_guess"] = self.mcmc_starting_guess
         return args
         
     # def configure(self, config:Union[None,Config], logger: Union[None,Logger]):
@@ -238,6 +244,7 @@ class Sampler(Generic[D,M], Task, ABC):
         return x
     
     def prior_transforms(self) -> List[PriorTransform]:
+        """ The :py:class:`~sika.modeling.PriorTransform` objects for each unfrozen parameter"""
         p = [t for m in self.models for t in m.prior_transforms()]
         for pset in self.aux_param_sets:
             p.extend(pset.get_unfrozen_transforms())
@@ -306,7 +313,11 @@ class Sampler(Generic[D,M], Task, ABC):
         
         if self.sampler_type == "pymultinest":
             self.res, self.logprob_chain, self.plot_chain, self.max_params = self.sample_pymn()
-                
+        
+        if self.sampler_type == "emcee":
+            self.res, self.plot_chain, self.max_params = self.sample_emcee(pool)
+            self.logprob_chain = None
+            
     def fit(self, pool=None):
         self.run_sampler(pool)
         self.save_results()
@@ -340,10 +351,11 @@ class Sampler(Generic[D,M], Task, ABC):
             self.write_out(f"Writing plot chain .npy file failed: {e}", level=logging.ERROR)
 
         # save logprob chain
-        logprob_chain_outpath = join(self.outdir, "logprob_chain.pkl")
-        with open(logprob_chain_outpath, "wb") as f:
-            pickle.dump(self.logprob_chain, f)
-        self.write_out(f"Wrote logprob chain (pkl) to {logprob_chain_outpath}")
+        if self.logprob_chain is not None:
+            logprob_chain_outpath = join(self.outdir, "logprob_chain.pkl")
+            with open(logprob_chain_outpath, "wb") as f:
+                pickle.dump(self.logprob_chain, f)
+            self.write_out(f"Wrote logprob chain (pkl) to {logprob_chain_outpath}")
         
         # make the best fit model
         model_outpath = join(self.outdir, "best_fit_models.pkl")
@@ -375,6 +387,8 @@ class Sampler(Generic[D,M], Task, ABC):
         """:meta private:"""      
         if self.sampler_type == "dynesty":
             self.visualize_dynesty()
+        if self.sampler_type == "emcee":
+            self.visualize_emcee()
          
         show = self.config.get("show_plots", False)
         
@@ -524,4 +538,133 @@ class Sampler(Generic[D,M], Task, ABC):
         max_params = plot_chain[np.argmax(logprob_chain)]
         
         return res, logprob_chain, plot_chain, max_params
+        
+    def log_prior(self, theta):
+        """ Log prior for MCMC """
+        total = 0.0
+        for value, transform in zip(theta, self.prior_transforms()):
+            lp = transform.log_prior(value)
+            if not np.isfinite(lp):
+                return -np.inf
+            total += lp
+        return total
+
+    def log_posterior(self, theta):
+        """ Log posterior for MCMC """
+        logprior = self.log_prior(theta)
+        if not np.isfinite(logprior):
+            return -np.inf
+        loglike = self.iterate(theta)
+        return logprior + loglike
+    
+    def generate_initial_mcmc_point(self, n_candidates=256):
+        """ Generate an initial MCMC guess. Randomly draws a set of candidates from a unit cube, puts them through the prior transform into physical param space, and chooses the candidate with maximum log posterior"""
+        candidates_u = np.random.rand(n_candidates, self.nparams)
+        candidates_x = np.array([self.prior_transform(u) for u in candidates_u])
+
+        scores = np.full(n_candidates, -np.inf)
+        constraint_violations = []
+        for i, theta in enumerate(candidates_x):
+            try:
+                self.set_model_params(theta)
+                for constraint in self.constraints:
+                    if not constraint.validate():
+                        constraint_violations.append(constraint.failure_message())
+                scores[i] = self.log_posterior(theta)
+            except Exception:
+                pass
+        good = np.isfinite(scores)
+        num_good = np.count_nonzero(good)
+        best = np.argmax(scores)
+                
+        if num_good < min(int(n_candidates / 2), 32):
+            raise RuntimeError(f"When looking for MCMC initial point, less than {min(int(n_candidates / 2), 32)} of the {n_candidates} initial prior draws had finite likelihoods. Please manually provide an initial guess using set_mcmc_starting_guess. During the draws, encountered the following constraint violations:\n"+"\n".join(constraint_violations))
+            
+        best_candidate = candidates_x[best]
+        best_score = scores[best]
+        self.write_out(f"While searching for MCMC initial point, generated {n_candidates} candidate points, {num_good} of which yielded valid posterior draws. The best guess, with log posterior {best_score}, was")
+        for pname, val in zip(self.param_names, best_candidate):
+            self.write_out(f"{pname}: {val:.5f}")
+        if len(constraint_violations):
+            self.write_out(f"In the process, encountered the following constraint violations:\n"+"\n".join(constraint_violations))
+        return best_candidate, candidates_x, scores
+    
+    def set_mcmc_starting_guess(self, guess:np.ndarray):
+        """Set the starting points for the MCMC walkers. The provided array must have shape (number of parameters, number of walkers), and the first axis must match the order of parameters (view with ) The number of walkers is set in the config.
+
+        :param guess: _description_
+        :type guess: np.ndarray
+        """
+        self.mcmc_starting_guess = guess
+    
+    # def mcmc_guess_from_user(self):
+    
+    def generate_mcmc_guesses(self, n_candidates=256, starting_jitter=0.01, max_attempts=10):
+        target_cfg = self.config[self.config["target"]]
+        cfg = target_cfg["emcee"]
+        nwalkers = cfg['nwalkers']
+        best_guess, candidates, scores = self.generate_initial_mcmc_point(n_candidates)
+        good_candidates = np.array(candidates[np.isfinite(scores)])
+        scales = []
+        for i, p in enumerate(self.params):
+            if p.prior_transform.scale is not None:
+                scales.append(p.prior_transform.scale)
+            else:  # estimate the scale using the spread of drawn candidates
+                scales.append(np.std(good_candidates[:,i]))
+        scales = np.array(scales)
+        jitter = starting_jitter
+        for i in range(max_attempts):
+            jitter_scale = scales * jitter
+            walkers = best_guess + np.random.normal(0.0, jitter_scale, size=(nwalkers, self.nparams))
+            good = np.array([np.isfinite(self.log_posterior(w)) for w in walkers])
+            if good.all():
+                self.write_out("Accepted starting positions.")
+                return walkers
+            self.write_out(f"Rejected starting positions on iter {i}. {np.count_nonzero(~good)} out of {nwalkers} starting points were invalid. Iterating.")
+            jitter *= 0.5
+        raise RuntimeError(f"Unable to find viable starting positions within {max_attempts} iterations. Please supply them manually with set_mcmc_starting_guess.")
+    
+    def sample_emcee(self, pool):
+        import emcee
+        target_cfg = self.config[self.config["target"]]
+        cfg = target_cfg["emcee"]
+        guess_cfg = target_cfg.get('initial_pos',{})
+        nwalkers = cfg['nwalkers']  
+        nsteps = cfg['nsteps']      
+        
+        if pool is None:
+            self.write_out("No pool provided, running single.")
+            size = 1
+        else:
+            self.write_out(f"Using pool {pool}, size: {pool.size}")
+            size = pool.size or 1
+        
+        if self.mcmc_starting_guess is None:
+            self.mcmc_starting_guess = self.generate_mcmc_guesses(n_candidates=guess_cfg.get('candidates',256), starting_jitter=guess_cfg.get('starting_jitter',0.01), max_attempts=guess_cfg.get('max_attempts',10))
+        
+        sampler = emcee.EnsembleSampler(nwalkers,self.nparams,self.log_posterior,pool)
+        sampler.run_mcmc(self.mcmc_starting_guess,nsteps,progress=True)
+        
+        self._raw_chain = sampler.get_chain()
+        self._raw_chain_flat = sampler.get_chain(flat=True)
+        
+        tau = sampler.get_autocorr_time()
+        self.write_out(f"Autocorrelation time: {tau}")
+        plot_chain = sampler.get_chain(discard = int(2.5*max(tau)), thin=int(max(tau)/2), flat=True)
+        max_params = np.percentile(plot_chain, 50, axies=0)
+        return sampler, plot_chain, max_params
+
+    def visualize_emcee(self):
+        ## parameter timeseries - make a stupidly large plot
+        
+        fig, axes = plt.subplots(self.nparams, figsize=(10, 7/3 * self.nparams), sharex=True)
+        for i in range(self.nparams):
+            ax = axes[i]
+            ax.plot(self._raw_chain[:, :, i], "k", alpha=0.3)
+            ax.set_xlim(0, len(self._raw_chain))
+            ax.set_ylabel(self.param_names[i])
+            ax.yaxis.set_label_coords(-0.1, 0.5)
+
+        axes[-1].set_xlabel("step number")
+        savefig('mcmc_param_timeseries.png',config=self.config,outdir=self.outdir)
         
