@@ -87,6 +87,38 @@ def test_set_from_flat():
         assert val == i
         assert sel['a'] == coord_v[i]
 
+@pytest.mark.params
+def test_scalar_guess():
+    p = Parameter("A", NullPriorTransform(), guess=5)
+    assert p.guess() == 5
+    assert np.array_equal(p.flattened_guess(), np.array([5]))
+
+@pytest.mark.params
+def test_guess_unset():
+    p = Parameter("A", NullPriorTransform())
+    assert p.guess() is None
+    assert p.guess_as_xarray() is None
+    assert p.flattened_guess() is None
+
+@pytest.mark.params
+def test_guess_init_with_coords():
+    coords = {"a":["a","b","c","d"]}
+    guess = [10,11,12,13]
+    p = Parameter("A", NullPriorTransform(), varies_with=["a"], coords=coords, guess=guess)
+    assert p.guess({"a":"c"}) == 12
+    assert np.array_equal(p.flattened_guess(), np.array(guess))
+
+@pytest.mark.params
+def test_set_guess_from_flat():
+    coord_v = ["a","b","c","d"]
+    coords = {"a":coord_v}
+    guess = [20,21,22,23]
+    p = Parameter("A", NullPriorTransform(), varies_with=["a"], coords=coords)
+    p.set_guess_from_flat(guess)
+    assert np.array_equal(p.flattened_guess(), np.array(guess))
+    for i, c_v in enumerate(coord_v):
+        assert p.guess({"a": c_v}) == guess[i]
+
 
 if __name__ == "__main__":
     pytest.main()

@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "sika"
 description = "Flexible pipeline and sampling framework"
 authors = [
-    {name="Sage Santomenna", email = "mstp2022@mymail.pomona.edu"},
+    {name="Sage Santomenna", email = "sage.santomenna@gmail.com"},
 ]
 dynamic = ["version"]
 readme = "README.md"
@@ -28,7 +28,8 @@ dependencies = [
     'dynesty',
     'pymultinest',
     'corner',
-    'networkx'
+    'networkx',
+    'h5py'
 ]
 
 [project.optional-dependencies]
@@ -44,7 +45,6 @@ spectroscopy = [
     "astropy",
     "petitRADTRANS",
     "requests",
-    "h5py",
     "paramiko"
 ]
 test = [

@@ -12,7 +12,8 @@ class LnLikelihood(Loss):
     def __call__(self, data_errors, model_residuals) -> float:
         error = np.concatenate(data_errors, axis=None)
         resid = np.concatenate(model_residuals, axis=None)
-
+        if np.all(error==0):
+            raise ValueError("Chi-squared is undefined when all errors are zero!")
         all_chi2 = np.nansum((resid ** 2 / error ** 2))
 
         return -0.5 * all_chi2

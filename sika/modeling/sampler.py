@@ -1,33 +1,69 @@
 import sys
+import os
 from os import makedirs
 from os.path import join, exists
 import pickle
 import logging
-from typing import List, Union, Optional, Dict, TypeVar, Generic, Tuple, Callable
+from typing import Any, List, Union, Optional, Dict, TypeVar, Generic, Tuple, Callable
 import numpy as np 
 import dynesty.plotting as dyplot
 from dynesty import NestedSampler
 import pandas as pd
-
+import json
 from abc import ABC, abstractmethod
-
+from enum import Enum
 import matplotlib.pyplot as plt
 
 from sika.task import Task
 from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintViolation, AuxiliaryParameterSet, PriorTransform, ParameterSet
 
+
 # this is required or pickling of things like lambdas will not work
 import dill
 import dynesty.utils
 dynesty.utils.pickle_module = dill
+
+import emcee
+
 logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
 logging.getLogger('PIL').setLevel(logging.WARNING)  # suppress buggy tk PIL output
 
 from sika.config import Config
-from sika.utils import NodeSpec, NodeShape, save_bestfit_dict, savefig, plot_corner, get_mpi_info, get_process_info
+from sika.utils import NodeSpec, NodeShape, save_bestfit_dict, savefig, plot_corner, get_mpi_info, get_process_info, get_pool
 from sika.product import Product
+from scipy.optimize import minimize
 
 __all__ = ["Sampler"]
+
+_WORKER_SAMPLER: Optional["Sampler[Any, Any]"] = None
+
+class EmceeGuessType(Enum):
+    Manual = "manual"
+    Random = 'random'
+    Minimize = 'minimize'
+    # Optimize = 'optimize'  # should just remove this option bc its a blind search and not very reliable
+
+def _init_worker_sampler(sampler: "Sampler[Any, Any]") -> None:
+    global _WORKER_SAMPLER
+    _WORKER_SAMPLER = sampler
+
+
+def _worker_iterate(parameters: np.ndarray) -> float:
+    if _WORKER_SAMPLER is None:
+        raise RuntimeError("Worker sampler has not been initialized")
+    return _WORKER_SAMPLER.iterate(parameters)
+
+
+def _worker_prior_transform(unit_cube: np.ndarray) -> np.ndarray:
+    if _WORKER_SAMPLER is None:
+        raise RuntimeError("Worker sampler has not been initialized")
+    return _WORKER_SAMPLER.prior_transform(unit_cube)
+
+
+def _worker_log_posterior(theta: np.ndarray) -> float:
+    if _WORKER_SAMPLER is None:
+        raise RuntimeError("Worker sampler has not been initialized")
+    return _WORKER_SAMPLER.log_posterior(theta)
 
 D = TypeVar('D', bound=Product, covariant=True)  # type of the data Product
 M = TypeVar('M', bound=Product, covariant=True)  # type of the model Product
@@ -69,7 +105,9 @@ class Sampler(Generic[D,M], Task, ABC):
         self.loss = loss
         self.sampler = None
         self.restore_from = restore_from
+        
         self.mcmc_starting_guess = None
+        
         self._data_params = data_params if data_params else {}
         self.loss_adjustments = []
         if isinstance(data, Dataset):
@@ -119,8 +157,21 @@ class Sampler(Generic[D,M], Task, ABC):
         psets = []
         for m in self.models:
             psets.extend(m.parameter_sets)
-        psets.extend[self.aux_param_sets]
+        psets.extend(self.aux_param_sets)
         return psets
+
+    @property
+    def flattened_guess(self) -> np.ndarray | None:
+        guesses = []
+        for pset in self.parameter_sets:
+            flattened = pset.flattened_guess()
+            if flattened is None:
+                return None
+            if len(flattened):
+                guesses.append(flattened)
+        if not guesses:
+            return np.array([])
+        return np.concatenate(guesses)
         
     def node_spec(self) -> NodeSpec:
         return NodeSpec(
@@ -294,6 +345,10 @@ class Sampler(Generic[D,M], Task, ABC):
         self.write_out("Writing model architecture to file...")
         with open(join(self.outdir, "model.json"), "w+") as f:
             f.write(self.json())
+            
+        self.write_out("Writing parameter names to file...")
+        with open(join(self.outdir,'parameter_names.txt'), 'w+') as f:
+            f.write('\n'.join(self.param_names))
 
     def add_loss_adjustment(self, adjustment: Callable[[float, List[float], Dataset, Dataset, np.ndarray, np.ndarray, Config], float], description: str):
         """Add a callable that takes the current loss, parameters, model, data, and config as input and returns a loss adjustment. Will be called at every iteration of the model and directly added to the loss
@@ -306,20 +361,18 @@ class Sampler(Generic[D,M], Task, ABC):
         self.loss_adjustments.append((adjustment, description))
         self.write_out(f"Added loss adjustment: {description}")
 
-    def run_sampler(self,pool):
+    def run_sampler(self,pool=None, mcmc_convergence_test=None):
         """:meta private:"""
         if self.sampler_type == 'dynesty':
-            self.res, self.logprob_chain, self.plot_chain, self.max_params = self.sample_dynesty(pool)
-        
+            self.res, self.plot_chain, self.logprob_chain, self.log_likes, self.log_priors, self.map_params, self.mle_params = self.sample_dynesty(pool)
         if self.sampler_type == "pymultinest":
-            self.res, self.logprob_chain, self.plot_chain, self.max_params = self.sample_pymn()
-        
+            self.res, self.plot_chain, self.logprob_chain, self.log_likes, self.log_priors, self.map_params, self.mle_params = self.sample_dynesty(pool)
         if self.sampler_type == "emcee":
-            self.res, self.plot_chain, self.max_params = self.sample_emcee(pool)
-            self.logprob_chain = None
+            self.res, self.plot_chain, self.logprob_chain, self.log_likes, self.log_priors, self.map_params, self.mle_params = self.sample_emcee(pool, mcmc_convergence_test)
+        self.max_params = self.map_params
             
-    def fit(self, pool=None):
-        self.run_sampler(pool)
+    def fit(self, pool=None, mcmc_convergence_test=None):
+        self.run_sampler(pool,mcmc_convergence_test)
         self.save_results()
         logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
         self.visualize_results()
@@ -331,45 +384,111 @@ class Sampler(Generic[D,M], Task, ABC):
         """:meta private:"""
         # save best fit parameters
         self.best_fit_dict = dict(zip(self.param_names, self.max_params))
-        self.write_out("Best fit parameters:", self.best_fit_dict)
-        param_outpath = join(self.outdir, "best_fit_params.pkl")
-        save_bestfit_dict(self.best_fit_dict, param_outpath)
-        self.write_out(f"Wrote best fit parameters to {param_outpath}")
-        
-        # save plot chain
-        plot_chain_outpath = join(self.outdir, "plot_chain.pkl")
-        with open(plot_chain_outpath, "wb") as f:
-            pickle.dump(self.plot_chain, f)
-        self.write_out(f"Wrote plot chain to {plot_chain_outpath}")
+        # self.write_out("Best fit parameters:", self.best_fit_dict)
+        try:
+            param_outpath = join(self.outdir, "best_fit_params.pkl")
+            save_bestfit_dict(self.best_fit_dict, param_outpath)
+            self.write_out(f"Wrote best fit (MAP) parameters to {param_outpath}")
+        except Exception as e:
+            self.write_out(f"Writing best fit (MAP) parameters to .pkl file failed: {e}", level=logging.ERROR)
+        # # save plot chain
+        # plot_chain_outpath = join(self.outdir, "plot_chain.pkl")
+        # with open(plot_chain_outpath, "wb") as f:
+        #     pickle.dump(self.plot_chain, f)
+        # self.write_out(f"Wrote plot chain to {plot_chain_outpath}")
         
         try:
             header = ','.join(self.param_names)
-            plot_chain_txt_outpath = join(self.outdir, "plot_chain.npy")
+            plot_chain_txt_outpath = join(self.outdir, "plot_chain.txt")
             np.savetxt(fname=plot_chain_txt_outpath, X=self.plot_chain, header=header)
-            self.write_out(f"Wrote logprob chain (npy) to {plot_chain_txt_outpath}")
+            self.write_out(f"Wrote plot chain to {plot_chain_txt_outpath}")
         except Exception as e:
             self.write_out(f"Writing plot chain .npy file failed: {e}", level=logging.ERROR)
+            
 
-        # save logprob chain
-        if self.logprob_chain is not None:
-            logprob_chain_outpath = join(self.outdir, "logprob_chain.pkl")
-            with open(logprob_chain_outpath, "wb") as f:
-                pickle.dump(self.logprob_chain, f)
-            self.write_out(f"Wrote logprob chain (pkl) to {logprob_chain_outpath}")
+        try:
+            header = ','.join(self.param_names)
+            plot_chain_txt_outpath = join(self.outdir, "raw_plot_chain.txt")
+            np.savetxt(fname=plot_chain_txt_outpath, X=self._raw_chain_flat, header=header)
+            self.write_out(f"Wrote raw plot chain to {plot_chain_txt_outpath}")
+        except AttributeError:
+            pass
+        except Exception as e:
+            self.write_out(f"Writing raw plot chain .npy file failed: {e}", level=logging.ERROR)
         
-        # make the best fit model
-        model_outpath = join(self.outdir, "best_fit_models.pkl")
-        self.best_models = self.make_model(self.max_params)
-        with open(model_outpath, "wb") as f:
-            pickle.dump(self.best_models, f)
-        self.write_out(f"Wrote best fit model to {model_outpath}")
+        try:
+            logprob_chain_outpath = join(self.outdir, "log_prob_chain.txt")
+            np.savetxt(logprob_chain_outpath, self.logprob_chain)
+            self.write_out(f"Wrote logprob chain to {logprob_chain_outpath}")
+        except Exception as e:
+            self.write_out(f"Writing logprob chain .npy file failed: {e}", level=logging.ERROR)
+            
+        try:
+            raw_logprob_chain_outpath = join(self.outdir, "raw_plot_chain.txt")
+            np.savetxt(fname=raw_logprob_chain_outpath, X=self._raw_log_prob_flat)
+            self.write_out(f"Wrote raw logprob chain to {raw_logprob_chain_outpath}")
+        except AttributeError:
+            pass
+        except Exception as e:
+            self.write_out(f"Writing raw logprob chain .txt file failed: {e}", level=logging.ERROR)
+
+        try:
+            log_likes_outpath = join(self.outdir, "log_like_chain.txt")
+            np.savetxt(log_likes_outpath, self.log_likes)
+            self.write_out(f"Wrote log likelihood chain to {log_likes_outpath}")
+        except Exception as e:
+            self.write_out(f"Writing log likelihood chain .txt file failed: {e}", level=logging.ERROR)
         
-        # save the post-processed data
-        data_outpath = join(self.outdir, "data.pkl")
-        with open(data_outpath, "wb") as f:
-            pickle.dump(self.data, f)
-        self.write_out(f"Wrote data to {data_outpath}")
+        try:
+            log_priors_outpath = join(self.outdir, "log_prior_chain.txt")
+            np.savetxt(log_priors_outpath, self.log_priors)
+            self.write_out(f"Wrote log prior chain to {log_priors_outpath}")
+        except Exception as e:
+            self.write_out(f"Writing log prior chain .txt file failed: {e}", level=logging.ERROR)
+
+        try:
+            # make the best fit model
+            model_outpath = join(self.outdir, "best_fit_models.pkl")
+            self.best_models = self.make_model(self.max_params)
+            with open(model_outpath, "wb") as f:
+                pickle.dump(self.best_models, f)
+            self.write_out(f"Wrote best fit (MAP) model to {model_outpath}")
+        except Exception as e:
+            self.write_out(f"Making/writing best-fit (MAP) model file failed: {e}", level=logging.ERROR)
         
+        try:
+            # save the post-processed data
+            data_outpath = join(self.outdir, "data.pkl")
+            with open(data_outpath, "wb") as f:
+                pickle.dump(self.data, f)
+            self.write_out(f"Wrote data to {data_outpath}")
+        except Exception as e:
+            self.write_out(f"Writing data .pkl file failed: {e}", level=logging.ERROR)
+        
+        try:
+            map_p = dict(zip(self.param_names,self.map_params))
+            self.write_out('Maximum a posteriori parameters:')
+            for k,v in map_p.items():
+                self.write_out(f'{k}: {v:.3g}')
+            map_outpath = join(self.outdir,'MAP_params.json')
+            with open(map_outpath,'w+') as f:
+                json.dump(map_p,f)
+            self.write_out(f"Wrote MAP params to {map_outpath}")
+        except Exception as e:
+            self.write_out(f"Writing MAP parameters .json file failed: {e}", level=logging.ERROR)
+        
+        try:
+            mle_p = dict(zip(self.param_names,self.mle_params))
+            self.write_out('Maximum likelihood parameters:')
+            for k,v in mle_p.items():
+                self.write_out(f'{k}: {v:.3g}')
+            MLE_outpath = join(self.outdir,'MLE_params.json')
+            with open(MLE_outpath,'w+') as f:
+                json.dump(mle_p,f)
+            self.write_out(f"Wrote MLE params to {MLE_outpath}")
+        except Exception as e:
+            self.write_out(f"Writing MAP parameters .json file failed: {e}", level=logging.ERROR)
+            
         import corner.core
         corner_chains = corner.core._parse_input(self.plot_chain)
         self.param_w_uncert = {}
@@ -377,11 +496,21 @@ class Sampler(Generic[D,M], Task, ABC):
             q_lo, q_mid, q_hi = corner.quantile(chain, [0.16, 0.5, 0.84])
             q_m, q_p = q_mid - q_lo, q_hi - q_mid
             self.param_w_uncert[pname] = (q_mid, (q_p,q_m,np.std(chain)))
-        p_with_uncert_outpath = join(self.outdir, "best_params_uncert.pkl")
-        with open(p_with_uncert_outpath, "wb") as f:
-            pickle.dump(self.param_w_uncert, f)
-        self.write_out(f"Wrote param with uncertainties to {p_with_uncert_outpath}")
+
+        self.write_out("Chain distributions:")
+        for k,(med, (plus, minus, std)) in self.param_w_uncert.items():
+            self.write_out(f"{k}: {med:.3g} +{plus:.3g}/-{minus:.3g}")
         
+        p_with_uncert_outpath = join(self.outdir, "best_params_uncert.json")
+        with open(p_with_uncert_outpath,'w+') as f:
+            json.dump(self.param_w_uncert,f)
+        self.write_out(f"Wrote parameter medians with uncertainties to {p_with_uncert_outpath}")
+        
+        # p_with_uncert_outpath = join(self.outdir, "best_params_uncert.pkl")
+        # with open(p_with_uncert_outpath, "wb") as f:
+        #     pickle.dump(self.param_w_uncert, f)
+        # self.write_out(f"Wrote param with uncertainties to {p_with_uncert_outpath}")
+
     
     def visualize_results(self):
         """:meta private:"""      
@@ -401,7 +530,37 @@ class Sampler(Generic[D,M], Task, ABC):
         except Exception as e:
             print('Corner / trace plot failed')
             print(e)
-        
+    
+    def compute_log_like(self, samples_chain, log_prob):
+        log_prior = np.empty_like(log_prob)
+
+        for i, sample in enumerate(samples_chain):
+            log_p = self.log_prior(sample)
+            log_prior[i] = log_p
+
+            if not np.isfinite(log_p):
+                self.write_out(f"Uh oh, sample {sample} has a log prior of {log_p}",level=logging.ERROR)
+
+        log_like = log_prob - log_prior
+        log_like[~np.isfinite(log_prior)] = -np.inf
+
+        return log_like, log_prior
+    
+    def compute_log_prob(self, samples_chain, log_like):
+        log_prior = np.empty_like(log_like)
+
+        for i, sample in enumerate(samples_chain):
+            log_p = self.log_prior(sample)
+            log_prior[i] = log_p
+
+            if not np.isfinite(log_p):
+                self.write_out(f"Uh oh, sample {sample} has a log prior of {log_p}",level=logging.ERROR)
+
+        log_prob = log_like + log_prior
+        log_prob[~np.isfinite(log_prior)] = -np.inf
+
+        return log_prob, log_prior
+                
     
     def sample_dynesty(self, pool):
         """:meta private:"""
@@ -413,38 +572,50 @@ class Sampler(Generic[D,M], Task, ABC):
         sample_method = dynesty_cfg["sample_method"]
         dlogz_stop_crit = dynesty_cfg["dlogz_stop_crit"]
         live_file = join(self.outdir,"dynesty_live.pkl")
-        
-        if pool is None:
-            self.write_out("No pool provided.")
-            size = 1
-        else:
-            self.write_out(f"Using pool: {pool}, size: {pool.size}")
-            # this is a little silly - dynesty breaks with a SerialPool because it thinks it has size 0
-            # which leads to an ambiguous error (pop from an empty list) but it comes from this
-            size = pool.size or 1
-        
-        
-        if self.restore_from is None:
-            self.write_out("Starting sampling with Dynesty")
-            sampler = NestedSampler(self.iterate, self.prior_transform, self.nparams, nlive=num_live,
-                                    bound=bound_method, sample=sample_method, walks=num_walks, pool=pool, queue_size=size)
+
+        pool, managed_pool = self._resolve_process_pool(pool)
+        loglike_fn = _worker_iterate if managed_pool else self.iterate
+        prior_fn = _worker_prior_transform if managed_pool else self.prior_transform
+
+        try:
+            if pool is None:
+                self.write_out("No pool provided.")
+                size = 1
+            else:
+                self.write_out(f"Using pool: {pool}, size: {pool.size}")
+                # dynesty breaks with a SerialPool because it thinks it has size 0.
+                size = pool.size or 1
+
+            if self.restore_from is None:
+                self.write_out("Starting sampling with Dynesty")
+                sampler = NestedSampler(loglike_fn, prior_fn, self.nparams, nlive=num_live,
+                                        bound=bound_method, sample=sample_method, walks=num_walks, pool=pool, queue_size=size)
+
+                sampler.run_nested(checkpoint_file=live_file, dlogz=dlogz_stop_crit, print_progress=True)
+            else:
+                self.write_out("Resuming sampling with Dynesty")
+                sampler = NestedSampler.restore(self.restore_from, pool=pool)
+                if managed_pool:
+                    sampler.loglikelihood.loglikelihood = loglike_fn
+                    sampler.prior_transform = prior_fn
+                sampler.run_nested(resume=True, checkpoint_file=live_file, print_progress=True)
+
+            self.write_out("Sampling complete, gathering results")
+
+            res = sampler.results
+            loglike_chain = res['logl']
+            plot_chain = res.samples_equal()
             
-            sampler.run_nested(checkpoint_file=live_file, dlogz=dlogz_stop_crit, print_progress=True)
-        else:
-            self.write_out("Resuming sampling with Dynesty")
-            sampler = NestedSampler.restore(self.restore_from,  pool=pool)
-            sampler.run_nested(resume=True, checkpoint_file=live_file, print_progress=True)
-        
-        self.write_out("Sampling complete, gathering results")
-        
-        if pool is not None:
-            pool.close() 
-        
-        res = sampler.results
-        logprob_chain = res['logl']
-        plot_chain = res.samples_equal()
-        max_params = res['samples'][np.argmax(logprob_chain)]
-        return res, logprob_chain, plot_chain, max_params
+            log_prob_chain, log_prior_chain = self.compute_log_prob(res['samples'], loglike_chain)
+
+            map_params = res['samples'][np.argmax(log_prob_chain)]
+            mle_params = res['samples'][np.argmax(loglike_chain)]
+            
+            return res, plot_chain, log_prob_chain, loglike_chain, log_prior_chain, map_params, mle_params
+            
+        finally:
+            if managed_pool and pool is not None:
+                pool.close()
     
     def visualize_dynesty(self):
         """:meta private:"""
@@ -452,7 +623,36 @@ class Sampler(Generic[D,M], Task, ABC):
             fig, axes = dyplot.traceplot(self.res, labels=self.param_names)
             savefig("traceplots.png", config=self.config, outdir=self.outdir)
         except Exception as e:
-            self.write_out(f"Dynesty visualization failed: {e}",level=logging.ERROR)
+            self.write_out(f"Dynesty traceplot failed: {e}",level=logging.ERROR)
+        plt.cla()
+        
+        try:
+            fig, axes = dyplot.traceplot(self.res, labels=self.param_names, connect=True, connect_highlight=range(5))
+            savefig("dyn_connected_traceplot.png", config=self.config, outdir=self.outdir)
+        except Exception as e:
+            self.write_out(f"Dynesty connected traceplot failed: {e}",level=logging.ERROR)
+        plt.cla()
+        
+        try:
+            fig, axes = dyplot.runplot(self.res, logplot=True)
+            savefig("dyn_runplot.png", config=self.config, outdir=self.outdir)
+        except Exception as e:
+            self.write_out(f"Dynesty runplot failed: {e}",level=logging.ERROR)
+        plt.cla()
+
+        try:
+            fig, ax = dyplot.cornerpoints(self.res, cmap='plasma',kde=False, labels=self.param_names)
+            savefig("dyn_cornerpoints.png", config=self.config, outdir=self.outdir)
+        except Exception as e:
+            self.write_out(f"Dynesty cornerpoints failed: {e}",level=logging.ERROR)
+        plt.cla()
+        
+        try:
+            fig, ax = dyplot.cornerplot(self.res, color='blue', show_titles=True, labels=self.param_names, max_n_ticks=3, quantiles=None)
+            savefig("dyn_corner.png", config=self.config, outdir=self.outdir)
+        except Exception as e:
+            self.write_out(f"Dynesty cornerplot failed: {e}",level=logging.ERROR)
+        plt.cla()
         
     def _pymn_prior_transform(self, cube, ndim, nparams):
         unit_cube = np.array([cube[i] for i in range(ndim)])
@@ -525,19 +725,12 @@ class Sampler(Generic[D,M], Task, ABC):
 
         plot_chain = posterior_samples[:, :-1]
         loglike_chain = posterior_samples[:, -1]
-        # log_evid = analyzer.get_stats()['global evidence']
-        # try:
-        #     logprior = np.array([prior_prt(params, non_uniform_priors, labels_all) for params in plot_chain])
-        #     logprob_chain = loglike_chain + logprior
-        #     print('Adding log prior worked.')
-        # except Exception as e:
-        #     print(f'Warning: error in logprior addition: {e}')
-        #     logprob_chain = loglike_chain
-        logprob_chain = loglike_chain
+        log_prob_chain, log_prior_chain = self.compute_log_prob(plot_chain, loglike_chain)
 
-        max_params = plot_chain[np.argmax(logprob_chain)]
+        map_params = plot_chain[np.argmax(log_prob_chain)]
+        mle_params = plot_chain[np.argmax(loglike_chain)]
         
-        return res, logprob_chain, plot_chain, max_params
+        return res, plot_chain, log_prob_chain, loglike_chain, log_prior_chain, map_params, mle_params
         
     def log_prior(self, theta):
         """ Log prior for MCMC """
@@ -557,7 +750,61 @@ class Sampler(Generic[D,M], Task, ABC):
         loglike = self.iterate(theta)
         return logprior + loglike
     
-    def generate_initial_mcmc_point(self, n_candidates=256):
+    # def set_mcmc_starting_guess(self, guess:np.ndarray):
+    #     """Set the starting points for the MCMC walkers. The provided array must have shape (number of parameters, number of walkers), and the first axis must match the order of parameters. The number of walkers is set in the config. """
+    #     self.mcmc_starting_guess = guess
+    
+    def generate_random_mcmc_guesses(self):
+        """ Generate initial MCMC walker locations by drawing from the prior."""
+        target_cfg = self.config[self.config["target"]]
+        cfg = target_cfg["emcee"]
+        nwalkers = cfg['nwalkers']
+        
+        points = []
+        log_posts = []
+        constraint_violations = []
+        i = 0
+        while len(points) < nwalkers:
+            i+=1
+            theta = []
+            for p in self.params:
+                theta.extend(p.prior_transform.draw(p.nvals))                    
+            try:
+                self.set_model_params(theta)
+                for constraint in self.constraints:
+                    if not constraint.validate():
+                        constraint_violations.append(constraint.failure_message())
+                score = self.log_posterior(theta)
+                if np.isfinite(score):
+                    points.append(theta)
+                    log_posts.append(score)
+            except ConstraintViolation:
+                pass
+        best = np.argmax(log_posts)                
+        best_point = points[best]
+        best_log_post = log_posts[best]
+        self.write_out(f"While searching for MCMC initial points, generated {i} candidate points, {nwalkers} of which yielded valid posterior draws.")
+        self.write_out(f"The log posteriors of the generated points had mean {np.mean(log_posts):.1f}, median {np.median(log_posts):.2f}, and standard deviation {np.std(log_posts):.2f}.")
+        self.write_out(f"The best guess, with log posterior {best_log_post}, was")
+        for pname, val in zip(self.param_names, best_point):
+            self.write_out(f"{pname}: {val:.5f}")
+        if len(constraint_violations):
+            self.write_out("In the process, encountered the following constraint violations:")
+            self.write_out("\n".join(constraint_violations))
+        return points
+    
+    def generate_minimized_initial_mcmc_point(self, n_candidates=256):
+        nll = lambda *args: -self.iterate(*args)
+        initial, _, _ = self.generate_blind_opt_initial_mcmc_point(n_candidates)
+        soln = minimize(nll, initial)
+        mle = soln.x
+
+        self.write_out("Maximum likelihood estimates:")
+        for pname, val in zip(self.param_names, mle):
+            self.write_out(f"{pname}: {val:.5f}")
+        return mle
+
+    def generate_blind_opt_initial_mcmc_point(self, n_candidates=256):
         """ Generate an initial MCMC guess. Randomly draws a set of candidates from a unit cube, puts them through the prior transform into physical param space, and chooses the candidate with maximum log posterior"""
         candidates_u = np.random.rand(n_candidates, self.nparams)
         candidates_x = np.array([self.prior_transform(u) for u in candidates_u])
@@ -571,7 +818,7 @@ class Sampler(Generic[D,M], Task, ABC):
                     if not constraint.validate():
                         constraint_violations.append(constraint.failure_message())
                 scores[i] = self.log_posterior(theta)
-            except Exception:
+            except ConstraintViolation:
                 pass
         good = np.isfinite(scores)
         num_good = np.count_nonzero(good)
@@ -581,90 +828,334 @@ class Sampler(Generic[D,M], Task, ABC):
             raise RuntimeError(f"When looking for MCMC initial point, less than {min(int(n_candidates / 2), 32)} of the {n_candidates} initial prior draws had finite likelihoods. Please manually provide an initial guess using set_mcmc_starting_guess. During the draws, encountered the following constraint violations:\n"+"\n".join(constraint_violations))
             
         best_candidate = candidates_x[best]
-        best_score = scores[best]
-        self.write_out(f"While searching for MCMC initial point, generated {n_candidates} candidate points, {num_good} of which yielded valid posterior draws. The best guess, with log posterior {best_score}, was")
-        for pname, val in zip(self.param_names, best_candidate):
-            self.write_out(f"{pname}: {val:.5f}")
-        if len(constraint_violations):
-            self.write_out(f"In the process, encountered the following constraint violations:\n"+"\n".join(constraint_violations))
+        # best_score = scores[best]
+        # self.write_out(f"While searching for MCMC initial point, generated {n_candidates} candidate points, {num_good} of which yielded valid posterior draws. The best guess, with log posterior {best_score}, was")
+        # for pname, val in zip(self.param_names, best_candidate):
+        #     self.write_out(f"{pname}: {val:.5f}")
+        # if len(constraint_violations):
+        #     self.write_out(f"In the process, encountered the following constraint violations:\n"+"\n".join(constraint_violations))
         return best_candidate, candidates_x, scores
+                
+    # def generate_optimized_mcmc_guesses(self, n_candidates=256, starting_jitter=0.01, max_attempts=10):
+    #     """ Generate initial MCMC walker positions. Takes an optimized guess from :py:meth:`~sika.modeling.Sampler.generate_optimized_initial_mcmc_point` and adds a jitter, scaled by each prior, to populate the walker positions."""
+    #     target_cfg = self.config[self.config["target"]]
+    #     cfg = target_cfg["emcee"]
+    #     nwalkers = cfg['nwalkers']
+    #     best_guess, candidates, scores = self.generate_optimized_initial_mcmc_point(n_candidates)
+    #     good_candidates = np.array(candidates[np.isfinite(scores)])
+    #     scales = []
+    #     for i, p in enumerate(self.params):
+    #         if p.prior_transform.scale is not None:
+    #             scale = p.prior_transform.scale
+    #         else:  # estimate the scale using the spread of drawn candidates
+    #             scale = np.std(good_candidates[:,i])
+    #         scales.extend([scale]*p.nvals)  # param can have multiple vals if has coords
+    #     scales = np.array(scales)
+    #     jitter = starting_jitter
+    #     for i in range(max_attempts):
+    #         jitter_scale = scales * jitter
+    #         self.write_out(f'jitter scale {jitter_scale.shape}: {jitter_scale}')
+    #         self.write_out(f'best_guess {best_guess.shape}: {best_guess}')
+    #         self.write_out(f'nwalkers: {nwalkers}')
+    #         self.write_out(f'nparams: {self.nparams}')
+    #         walkers = best_guess + np.random.normal(0.0, jitter_scale, size=(nwalkers, self.nparams))
+    #         good = np.array([np.isfinite(self.log_posterior(w)) for w in walkers])
+    #         if good.all():
+    #             self.write_out("Accepted starting positions.")
+    #             return walkers
+    #         if np.count_nonzero(good) > 2/3 * len(good):
+    #             self.write_out("Regenerating some starting positions")
+    #             for i in np.where(~good):
+    #                 for _ in range(max_attempts):
+    #                     guess = best_guess + np.random.normal(0.0, jitter_scale, size=(self.nparams))
+    #                     if np.isfinite(self.log_posterior(guess)):
+    #                         walkers[i] = guess
+    #                         good[i] = True
+    #                         continue
+    #         if good.all():
+    #             self.write_out("Accepted starting positions.")
+    #             return walkers
+                    
+    #         self.write_out(f"Rejected starting positions on iter {i}. {np.count_nonzero(~good)} out of {nwalkers} starting points were invalid. Iterating.")
+    #         jitter *= 0.5
+    #     raise RuntimeError(f"Unable to find viable starting positions within {max_attempts} iterations. Please supply them manually with set_mcmc_starting_guess.")
     
-    def set_mcmc_starting_guess(self, guess:np.ndarray):
-        """Set the starting points for the MCMC walkers. The provided array must have shape (number of parameters, number of walkers), and the first axis must match the order of parameters (view with ) The number of walkers is set in the config.
-
-        :param guess: _description_
-        :type guess: np.ndarray
-        """
-        self.mcmc_starting_guess = guess
-    
-    # def mcmc_guess_from_user(self):
-    
-    def generate_mcmc_guesses(self, n_candidates=256, starting_jitter=0.01, max_attempts=10):
+    def generate_minimized_mcmc_guesses(self, n_candidates=256, starting_jitter=0.01, max_attempts=10):
         target_cfg = self.config[self.config["target"]]
         cfg = target_cfg["emcee"]
         nwalkers = cfg['nwalkers']
-        best_guess, candidates, scores = self.generate_initial_mcmc_point(n_candidates)
-        good_candidates = np.array(candidates[np.isfinite(scores)])
+        best_guess = self.generate_minimized_initial_mcmc_point(n_candidates)
         scales = []
         for i, p in enumerate(self.params):
-            if p.prior_transform.scale is not None:
-                scales.append(p.prior_transform.scale)
-            else:  # estimate the scale using the spread of drawn candidates
-                scales.append(np.std(good_candidates[:,i]))
+            if p.prior_transform.scale is None:
+                raise NotImplementedError(f'Minimized MCMC initialization only works when all prior transforms have defined scales ({p.prior_transform.dispname} does not!)')
+            scale = p.prior_transform.scale
+            scales.extend([scale]*p.nvals)  # param can have multiple vals if has coords
         scales = np.array(scales)
         jitter = starting_jitter
         for i in range(max_attempts):
             jitter_scale = scales * jitter
+            self.write_out(f'jitter scale {jitter_scale.shape}: {jitter_scale}')
+            self.write_out(f'best_guess {best_guess.shape}: {best_guess}')
+            self.write_out(f'nwalkers: {nwalkers}')
+            self.write_out(f'nparams: {self.nparams}')
             walkers = best_guess + np.random.normal(0.0, jitter_scale, size=(nwalkers, self.nparams))
             good = np.array([np.isfinite(self.log_posterior(w)) for w in walkers])
             if good.all():
                 self.write_out("Accepted starting positions.")
                 return walkers
+            if np.count_nonzero(good) > 2/3 * len(good):
+                self.write_out("Regenerating some starting positions")
+                for i in np.where(~good):
+                    for _ in range(max_attempts):
+                        guess = best_guess + np.random.normal(0.0, jitter_scale, size=(self.nparams))
+                        if np.isfinite(self.log_posterior(guess)):
+                            walkers[i] = guess
+                            good[i] = True
+                            continue
+            if good.all():
+                self.write_out("Accepted starting positions.")
+                return walkers
+                    
             self.write_out(f"Rejected starting positions on iter {i}. {np.count_nonzero(~good)} out of {nwalkers} starting points were invalid. Iterating.")
             jitter *= 0.5
         raise RuntimeError(f"Unable to find viable starting positions within {max_attempts} iterations. Please supply them manually with set_mcmc_starting_guess.")
     
-    def sample_emcee(self, pool):
-        import emcee
-        target_cfg = self.config[self.config["target"]]
-        cfg = target_cfg["emcee"]
-        guess_cfg = target_cfg.get('initial_pos',{})
-        nwalkers = cfg['nwalkers']  
-        nsteps = cfg['nsteps']      
+    def has_mcmc_converged(self, iteration, tau, previous_tau:np.ndarray):
+        valid = np.isfinite(tau) & ~np.isnan(tau)
+        all_valid = np.all(valid)
         
-        if pool is None:
-            self.write_out("No pool provided, running single.")
-            size = 1
-        else:
-            self.write_out(f"Using pool {pool}, size: {pool.size}")
-            size = pool.size or 1
+        enough_iters = tau * 100 < iteration
+        all_enough_iters = np.all(enough_iters)
         
-        if self.mcmc_starting_guess is None:
-            self.mcmc_starting_guess = self.generate_mcmc_guesses(n_candidates=guess_cfg.get('candidates',256), starting_jitter=guess_cfg.get('starting_jitter',0.01), max_attempts=guess_cfg.get('max_attempts',10))
+        fractional_delta_tau = np.abs(previous_tau - tau) / tau
+        stable = fractional_delta_tau < 0.01
+        all_stable = np.all(stable)
         
-        sampler = emcee.EnsembleSampler(nwalkers,self.nparams,self.log_posterior,pool)
-        sampler.run_mcmc(self.mcmc_starting_guess,nsteps,progress=True)
+        if all_valid and all_enough_iters and all_stable:
+            return True, f"MCMC has converged - done 100x more iterations than each parameter's autocorrelation time (mean tau*100={np.mean(tau)*100 :.1f}, iterations={iteration}) and each parameter's tau is stable (mean fractional delta tau = {np.mean(fractional_delta_tau) :.5f} < 0.01)."
         
-        self._raw_chain = sampler.get_chain()
-        self._raw_chain_flat = sampler.get_chain(flat=True)
+        msg = "MCMC has not converged because "
+        if not all_valid:
+            if np.all(~all_valid):
+                msg += "no parameters have valid autocorrelation values (all NaN/inf)"
+            else:
+                invalid_params = np.array(self.param_names)[~valid]
+                param_list = ', '.join([f"'{n}' ({t:.1f})" for n,t in zip(invalid_params,tau[~valid])]) 
+                msg += f"{len(invalid_params)}/{self.nparams} parameters - {param_list} - have invalid tau values"
         
-        tau = sampler.get_autocorr_time()
-        self.write_out(f"Autocorrelation time: {tau}")
-        plot_chain = sampler.get_chain(discard = int(2.5*max(tau)), thin=int(max(tau)/2), flat=True)
-        max_params = np.percentile(plot_chain, 50, axies=0)
-        return sampler, plot_chain, max_params
-
-    def visualize_emcee(self):
-        ## parameter timeseries - make a stupidly large plot
+        if not all_enough_iters and not np.all(~enough_iters == ~valid):  # if all of the not enough iters are because of invalid values, this msg can be skipped  (yes i know the inversion isnt necessary, but i think it makes it easier to read)
+            if not all_valid:
+                msg += " and "
+            if np.all(~enough_iters):
+                msg += f"no parameters have 100*tau < iterations (mean tau {np.mean(tau):.1f}, {iteration} iterations)"
+            else:
+                eff_not_enough = ~enough_iters & valid  # don't double-count invalid
+                not_conv_params = np.array(self.param_names)[eff_not_enough]
+                param_list = ', '.join([f"'{n}' ({t:.1f})" for n,t in zip(not_conv_params,tau[eff_not_enough])]) 
+                msg += f"{len(not_conv_params)}/{self.nparams} parameters - {param_list} - do not have tau*100 > iterations ({iteration})"
         
-        fig, axes = plt.subplots(self.nparams, figsize=(10, 7/3 * self.nparams), sharex=True)
-        for i in range(self.nparams):
+        if not all_stable and not np.all(~all_stable == ~valid):  # if all of the not enough iters are because of invalid values, this msg can be skipped  (yes i know the inversion isnt necessary, but i think it makes it easier to read)
+            if not (all_valid and all_enough_iters):
+                msg += " and "
+            if np.all(~stable):
+                msg += "no parameters have a stable tau (fractional change < 1%) yet"
+            else:
+                eff_unstable = ~stable & valid  # don't double-count invalid
+                not_conv_params = np.array(self.param_names)[eff_unstable]
+                
+                param_list = ', '.join([f"'{n}' ({fdt:.2f})" for n,fdt in zip(not_conv_params,fractional_delta_tau[eff_unstable])]) 
+                msg += f"{len(not_conv_params)}/{self.nparams} parameters - {param_list} - do not have a stable tau (fractional change < 0.01) yet"
+                
+        return False, msg+'.'
+    
+    def get_manual_starting_guess(self):
+        guess = self.flattened_guess
+        if guess is None:
+            missing_guesses = [f"'{self.short_param_names[i]}'" for i in range(len(self.params)) if self.params[i].guess is None]
+            if len(missing_guesses) == len(self.params):
+                raise ValueError("MCMC initialization method is 'manual' (indicating that manual starting guesses will be provided for each parameter) but no parameters have provided guesses! Provide them during initialization or manually set using each parameter's set_guess method.")
+            missing_guess_str = ', '.join(missing_guesses)
+            raise ValueError(f"MCMC initialization method is 'manual' (indicating that manual starting guesses will be provided for each parameter) but the following parameter(s) are missing starting guesses: {missing_guess_str}. Provide them during initialization or manually set using each parameter's set_guess method.")
+        t_config = self.config[self.config['target']]
+        nwalkers = t_config['emcee']['nwalkers']
+        guess = guess + 1e-4 * np.random.randn(nwalkers,self.nparams)
+        return guess
+    
+    def _mcmc_param_timeseries(self, chain_full_shape, param_names):
+        nparams = len(param_names)
+        fig, axes = plt.subplots(nparams, figsize=(10, 7/3 * nparams), sharex=True)
+        for i in range(nparams):
             ax = axes[i]
-            ax.plot(self._raw_chain[:, :, i], "k", alpha=0.3)
-            ax.set_xlim(0, len(self._raw_chain))
+            ax.plot(chain_full_shape[:, :, i], "k", alpha=0.3)
+            ax.set_xlim(0, len(chain_full_shape))
             ax.set_ylabel(self.param_names[i])
             ax.yaxis.set_label_coords(-0.1, 0.5)
 
         axes[-1].set_xlabel("step number")
+        
+        return fig, axes
+    
+    def _make_tau_plot(self, taus, iters):
+        plt.plot(iters,taus,marker='o')
+        plt.plot(iters,iters/100,linestyle='--',color='k')
+        plt.xlabel('iterations')
+        plt.ylabel(r'$\tau$')
+        plt.title(r'MCMC Autocorrelation ($\tau$)')
+    
+    def sample_emcee(self, pool, convergence_test=None):
+        plt.switch_backend('agg')
+        if convergence_test is None:
+            convergence_test = self.has_mcmc_converged
+        target_cfg = self.config[self.config["target"]]
+        cfg = target_cfg["emcee"]
+        guess_cfg = cfg.get('initial_pos', {})
+        nwalkers = cfg['nwalkers']  
+        nsteps = cfg['nsteps']
+        check_convergence_every = cfg.get('check_convergence_every',100)
+        burn_in_factor = cfg['burn_in_factor']   
+        thin_factor = cfg['thin_factor']   
+
+        pool, managed_pool = self._resolve_process_pool(pool)
+        logposterior_fn = _worker_log_posterior if managed_pool else self.log_posterior
+
+        method = guess_cfg.get('method','minimize')
+        try:
+            method = EmceeGuessType(method)
+        except ValueError as e:
+            raise ValueError(f"Invalid emcee guess type '{method}'. Valid guess types are {[opt.value for opt in EmceeGuessType]}.") from e
+        
+        if method == EmceeGuessType.Manual:
+            self.write_out('Using manually-provided MCMC starting points.')
+            self.mcmc_starting_guess = self.get_manual_starting_guess()
+        # if method == EmceeGuessType.Optimize:
+        #     self.write_out("Using optimized method to choose MCMC starting points")
+        #     self.mcmc_starting_guess = self.generate_optimized_mcmc_guesses(n_candidates=guess_cfg.get('candidates',256), starting_jitter=guess_cfg.get('starting_jitter',0.01), max_attempts=guess_cfg.get('max_attempts',10))
+        if method == EmceeGuessType.Random:
+            self.write_out("Using random method to choose MCMC starting points")
+            self.mcmc_starting_guess = self.generate_random_mcmc_guesses()
+        if method == EmceeGuessType.Minimize:
+            self.write_out("Using minimization method to choose MCMC starting points")
+            self.mcmc_starting_guess = self.generate_minimized_mcmc_guesses(n_candidates=guess_cfg.get('candidates',256), starting_jitter=guess_cfg.get('starting_jitter',0.01), max_attempts=guess_cfg.get('max_attempts',10))
+        
+        try:
+            if pool is None:
+                self.write_out("No pool provided, running single.")
+            else:
+                self.write_out(f"Using pool {pool}, size: {pool.size}")
+
+            # largely borrowed from https://emcee.readthedocs.io/en/stable/tutorials/monitor/
+            
+            if cfg.get("save_continuous",True):
+                self.write_out('Running MCMC with HDF backend (continuous saving).')
+                outfile = join(self.outdir, 'emcee_progress.h5')
+                backend = emcee.backends.HDFBackend(outfile)
+            else:
+                self.write_out('Running MCMC with standard backend.')
+                backend = emcee.backends.Backend()
+                
+            backend.reset(nwalkers, self.nparams)
+            sampler = emcee.EnsembleSampler(nwalkers, self.nparams, logposterior_fn, pool=pool, backend=backend)
+            # sampler.run_mcmc(self.mcmc_starting_guess, nsteps, progress=True)
+            index = 0
+            autocorr = np.empty(int(np.ceil(nsteps/check_convergence_every)))
+            old_tau = np.inf
+            
+            progress_plot_dir = join(self.outdir, 'mcmc_progress_plots')
+            makedirs(progress_plot_dir, exist_ok=True)
+            self.write_out(f'Progress plots will be written to {progress_plot_dir}')
+            
+            for sample in sampler.sample(self.mcmc_starting_guess,iterations=nsteps, progress=True):
+                if sampler.iteration % check_convergence_every:
+                    continue
+
+                # running autocorr time
+                iteration = sampler.iteration
+                tau = sampler.get_autocorr_time(tol=0)
+                autocorr[index] = np.mean(tau)
+                index += 1
+
+                converged, msg = convergence_test(iteration, tau, old_tau)
+                self.write_out(msg)
+                if converged:
+                    self.write_out(f'Converged after {sampler.iteration} iterations')
+                    break
+                if sampler.iteration + check_convergence_every < nsteps:  # dont overwrite tau if we havent converged and we're at the end - in that case we need to keep the old val to determine convergence
+                    old_tau = tau
+                    
+                fig, axes = self._mcmc_param_timeseries(sampler.get_chain(), self.param_names)
+                plt.savefig(join(progress_plot_dir,f'param_timeseries_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
+                
+                plt.close()
+                
+                self.write_out(autocorr[:index],np.arange(index)*check_convergence_every)
+                self._make_tau_plot(autocorr[:index], (np.arange(index)+1)*check_convergence_every)
+                plt.savefig(join(progress_plot_dir,f'autocorr_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
+                plt.close()
+            
+            tau = sampler.get_autocorr_time(tol=0)
+            iterations = sampler.iteration
+            self.write_out(f'Done sampling after {iterations} iterations (max allowed was {nsteps}).')
+            converged, msg = convergence_test(iterations, sampler.get_autocorr_time(tol=0), old_tau)
+            self.write_out(f"Autocorrelation time: {tau}")
+            
+            if not converged:
+                self.write_out("DID NOT CONVERGE!",level=logging.ERROR)
+                self.write_out(msg,level=logging.ERROR)
+                with open(join(self.outdir,'DID_NOT_CONVERGE.txt'),'w+') as f:
+                    f.write(msg)
+                    
+            with open(join(self.outdir,'autocorrelation_times.json'),'w+') as f:
+                json.dump(dict(zip(self.param_names,tau)),f)
+
+            self._raw_chain = sampler.get_chain()
+            self._raw_chain_flat = sampler.get_chain(flat=True)
+            self._raw_log_prob = sampler.get_log_prob()
+            self._raw_log_prob_flat = sampler.get_log_prob(flat=True)
+            if iterations > (max(tau) * burn_in_factor):
+                plot_chain = sampler.get_chain(discard=int(max(tau) * burn_in_factor), thin=int(min(tau) * thin_factor), flat=True)
+                log_prob_chain = sampler.get_log_prob(discard=int(max(tau) * burn_in_factor), thin=int(min(tau) * thin_factor), flat=True)
+            else:
+                self.write_out(f"Not chopping/thinning chains because they are too short - iterations ({iterations}) is less than the maximum tau ({max(tau)} times the burn-in factor ({burn_in_factor}, {max(tau)} * {burn_in_factor} = {max(tau) * burn_in_factor}))",level=logging.WARNING)
+                plot_chain = self._raw_chain_flat
+                log_prob_chain = self._raw_log_prob_flat
+            
+            log_like_chain, log_prior_chain = self.compute_log_like(plot_chain, log_prob_chain)
+
+            map_params = plot_chain[np.argmax(log_prob_chain)]
+            mle_params = plot_chain[np.argmax(log_like_chain)]
+            
+            return sampler, plot_chain, log_prob_chain, log_like_chain, log_prior_chain, map_params, mle_params
+        
+        finally:
+            if managed_pool and pool is not None:
+                pool.close()
+
+    def _should_manage_process_pool(self) -> bool:
+        parallel_cfg = self.config["parallel"]
+        return (
+            self.sampler_type in {"dynesty", "emcee"}
+            and not parallel_cfg["mpi"]
+            and parallel_cfg["processes"] > 1
+        )
+
+    def _resolve_process_pool(self, pool):
+        if not self._should_manage_process_pool():
+            return pool, False
+
+        if pool is not None:
+            self.write_out(
+                "Recreating the process pool inside the sampler so worker processes can keep sampler state globally instead of receiving the full sampler on every task.",
+                level=logging.WARNING,
+            )
+            pool.close()
+
+        managed_pool = get_pool(self.config, initializer=_init_worker_sampler, initargs=(self,))
+        return managed_pool, True
+
+    def visualize_emcee(self):
+        ## parameter timeseries - make a stupidly large plot
+        
+        fig, axes = self._mcmc_param_timeseries(self._raw_chain, self.param_names)
         savefig('mcmc_param_timeseries.png',config=self.config,outdir=self.outdir)
         

@@ -180,6 +180,28 @@ def test_set_values_flat_and_direct():
     arr2 = ps2.as_xarray()["p1"].values.flatten()
     np.testing.assert_array_equal(arr2, [5, 6, 7, 8])
 
+def test_flattened_guess_matches_parameter_order():
+    coords = {"night": ["n2", "n1"], "order": [1, 0]}
+    p1 = Parameter(
+        "p1",
+        prior_transform=Uniform(0, 1),
+        varies_with=["night", "order"],
+        coords=coords,
+        guess=np.array([[1, 2], [3, 4]]),
+    )
+    p2 = Parameter("p2", prior_transform=Uniform(0, 1), guess=5)
+    ps = AuxiliaryParameterSet(p1=p1, p2=p2)
+    ps.set_coords(coords)
+    np.testing.assert_array_equal(ps.flattened_guess(), np.array([1, 2, 3, 4, 5]))
+
+def test_flattened_guess_is_none_if_any_missing_guess():
+    coords = {"night": ["n1", "n2"]}
+    p1 = Parameter("p1", prior_transform=Uniform(0, 1), varies_with=["night"], coords=coords, guess=[1, 2])
+    p2 = Parameter("p2", prior_transform=Uniform(0, 1))
+    ps = AuxiliaryParameterSet(p1=p1, p2=p2)
+    ps.set_coords(coords)
+    assert ps.flattened_guess() is None
+
 def test_all_names_consistency():
     coords = {"night": ["n1", "n2"]}
     p1 = make_simple_param("p1", (2,), coords=coords)

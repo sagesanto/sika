@@ -24,6 +24,10 @@ class PriorTransform(ABC):
         """
         Transform a variable from the prior space to the parameter space.
         """
+    
+    @abstractmethod
+    def draw(self, nsamples:int) -> np.ndarray:
+        """ Draw samples from the prior. """
         
     @property
     @abstractmethod
@@ -89,6 +93,10 @@ class NullPriorTransform(PriorTransform):
     def _to_dict(self):
         return {}
     
+    def draw(self, nsamples:int) -> np.ndarray:
+        """ Draw samples from the prior. """
+        raise NotImplementedError("NullPriorTransform does not implement draw")
+    
     @property
     def scale(self) -> float:
         """Returns the characteristic scale of the prior, if one exists (else None). For use in determining MCMC perturbation size """
@@ -98,7 +106,7 @@ class NullPriorTransform(PriorTransform):
         raise NotImplementedError("NullPriorTransform does not implement empirical_pdf")
     
     def dispname(self):
-        raise NotImplementedError("NullPriorTransform does not implement dispname")
+        return "NullPriorTransform"
     
     def log_prior(self, value: float) -> float:
         raise NotImplementedError("NullPriorTransform does not implement log_prior")
@@ -126,6 +134,10 @@ class Uniform(PriorTransform):
 
     def __repr__(self) -> str:
         return f"Uniform(min_val={self.min_val}, max_val={self.max_val})"
+    
+    def draw(self, nsamples:int) -> np.ndarray:
+        """ Draw samples from the prior. """
+        return self.distr.rvs(nsamples)
 
     def _to_dict(self):
         return {
@@ -174,6 +186,10 @@ class Normal(PriorTransform):
             self.distr = norm(loc=mean, scale=std)
 
         super().__init__()
+        
+    def draw(self, nsamples:int) -> np.ndarray:
+        """ Draw samples from the prior. """
+        return self.distr.rvs(nsamples)
 
     def _to_dict(self):
         return {

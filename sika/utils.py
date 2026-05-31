@@ -266,13 +266,13 @@ def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_tit
         else:
             fig.legend(handles=all_lines, bbox_to_anchor=(1, 1), loc=1, borderaxespad=0, fontsize=fs2-1)
             
-def get_pool(config):
-    kwargs = {}
+def get_pool(config, **pool_kwargs):
+    kwargs = dict(pool_kwargs)
     parallel_cfg = config["parallel"]
     do_mpi = parallel_cfg["mpi"]  # bool
     processes = parallel_cfg["processes"]
     if do_mpi:
-        kwargs = {"use_dill":True}
+        kwargs.setdefault("use_dill", True)
     import schwimmbad
     pool = schwimmbad.choose_pool(mpi=do_mpi,processes=processes, **kwargs)
     if do_mpi:
@@ -546,3 +546,15 @@ def format_selector_string(selector:dict,filename=True):
     if filename:
         return s.replace(": ","_")
     return s
+
+def chi_sq(data_vals, model_vals, errors):
+    data_vals = np.asarray(data_vals)
+    model_vals = np.asarray(model_vals)
+    errors = np.asarray(errors)
+    residuals = data_vals - model_vals
+    return np.nansum((residuals / errors)**2)
+
+def reduced_chi_sq(data_vals, model_vals, errors, n_free_params):
+    chi2 = chi_sq(data_vals,model_vals,errors)
+    dof = len(data_vals) - n_free_params
+    return chi2 / dof
