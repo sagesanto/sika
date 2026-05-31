@@ -159,7 +159,7 @@ class Dataset(Generic[T], ABC):
             except KeyError:
                 raise ValueError(f"Dimension {dim} missing from dataset metadata.")
         for k, v in coords.items():
-            coords[k] = list(set(v))
+            coords[k] = list(dict.fromkeys(v))
             
         c_keys = list(coords.keys())
         c_vals = list(coords.values())
