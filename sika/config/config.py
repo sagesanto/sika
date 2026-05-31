@@ -1,13 +1,26 @@
 
 import os
 import tomlkit
-from typing import Any
+from typing import Any, Tuple
 import hashlib
 
 def _read_config(config_path:str):
     with open(config_path, "rb") as f:
         cfg = tomlkit.load(f)
     return cfg
+
+def flatten_mapping(mapping: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """ flatten a config dict down to make it easier to see what has changed """
+    flat: dict[str, Any] = {}
+    for key, value in mapping.items():
+        key_str = f"{prefix}.{key}" if prefix else str(key)
+        if hasattr(value, "unwrap"):
+            value = value.unwrap()
+        if isinstance(value, dict):
+            flat.update(flatten_mapping(value, key_str))
+        else:
+            flat[key_str] = value
+    return flat
 
 class Config:
     """
@@ -43,8 +56,8 @@ class Config:
 
     >>> cfg["KEY"] = "VALUE"  # sets in selected profile, or in main config if no profile selected
     >>> cfg["table"]["colnames"] = ["ra","dec"]  # can do nested set
-    >>> cfg.set("KEY") = "VALUE"  # sets in selected profile, or in main config if no profile selected
-    >>> cfg.set("KEY", profile=False) = "VALUE"  # sets in main profile, ignoring selected profile
+    >>> cfg.set("KEY", "VALUE")  # sets in selected profile, or in main config if no profile selected
+    >>> cfg.set("KEY", "VALUE", profile=False)  # sets in main profile, ignoring selected profile
 
     Can write the whole config (not just the profile, and not including the defaults) into the given file::
     
@@ -246,7 +259,7 @@ class Config:
     def __setitem__(self,index:str,new_val:Any):
         """Set the value of a new or existing key in the config. Will set the value in the selected profile, if one has been selected. See also: :py:meth:`~Config.set`
 
-        :param index: the key to assign a value to
+        :param index: the key to assign a value to, dotted if nested ('key1.key2')
         :type index: str
         :param new_val: the new value to assign
         :type new_val: Any
@@ -270,6 +283,46 @@ class Config:
     def __repr__(self) -> str:
         return f"Config from {self._filepath} with {f'profile {self.selected_profile_name}' if self.selected_profile_name else 'no profile'} selected and {f'defaults loaded from {self._default_path}' if self.has_defaults else 'no defaults loaded'}"
 
+    def to_dict(self) -> dict[str,Any]:
+        def convert(value):
+            if hasattr(value, "unwrap"):
+                return value.unwrap()
+            if isinstance(value, dict):
+                return {str(key): convert(val) for key, val in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [convert(item) for item in value]
+            return value
+        return convert(self._cfg)
+    
+    def flatten(self) -> dict[str, Any]:
+        """ Get this config as a 1-deep dictionary, with nested sections converted to dotted keys """
+        return flatten_mapping(self.to_dict())
+    
+    def diff(self, other) -> Tuple[dict[str, Any],dict[str, Any],list[str]]:
+        """ Get changes between this Config and another, key-value pairs that exist in the other Config but not this one, and keys that are not present in the other Config. 
+
+        :param other: the Config to compare to
+        :type other: Config
+        :return: changes, as a dict of dotted keys to values, additions, as a dict of dotted keys to values, and removals, as a list of dotted keys 
+        :rtype: Tuple[dict[str, Any],dict[str, Any],list[str]]
+        """
+        base_flat = flatten_mapping(self.to_dict())
+        other_flat = flatten_mapping(other.to_dict())
+        changed: dict[str, Any] = {}
+        removed: list[str] = []
+        added: dict[str, Any] = {}
+        for key, value in other_flat.items():
+            if key not in other_flat:
+                removed.append(key)
+                continue
+            if base_flat.get(key) != value:
+                changed[key] = value
+        for key, value in other_flat.items():
+            if key not in base_flat:
+                added[key] = value
+        return changed, added, removed
+        
+
     def checksum(self):
         """Compute an md5 checksum of the string representation of this Config. useful for validating that configuration files are consistent between different pipeline runs. 
 
@@ -277,3 +330,22 @@ class Config:
         :rtype: str
         """
         return hashlib.md5(str(self).encode(),usedforsecurity=False).hexdigest()
+    
+
+def config_diff(base_cfg: Config, cfg: Config) -> Tuple[dict[str, Any],dict[str, Any],list[str]]:
+    """ determine what has changed between base_cfg and cfg """
+    base_flat = flatten_mapping(base_cfg.to_dict())
+    cfg_flat = flatten_mapping(cfg.to_dict())
+    changed: dict[str, Any] = {}
+    removed: list[str] = []
+    added: dict[str, Any] = {}
+    for key, value in cfg_flat.items():
+        if key not in cfg_flat:
+            removed.append(key)
+            continue
+        if base_flat.get(key) != value:
+            changed[key] = value
+    for key, value in cfg_flat.items():
+        if key not in base_flat:
+            added[key] = value
+    return changed, added, removed

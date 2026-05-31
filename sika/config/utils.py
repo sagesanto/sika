@@ -21,6 +21,7 @@ def configure_logger(name, log_dir=None, write_to_file=True):
     :return: logger
     :rtype: logging.Logger
     """
+    
     if write_to_file:
         log_cfg_path = logging_config_path
     else:
@@ -29,7 +30,9 @@ def configure_logger(name, log_dir=None, write_to_file=True):
     if log_dir == None:
         log_dir = logging_dir
     # first, check if the logger has already been configured
-    if logging.getLogger(name).hasHandlers():
+    if logging.getLogger(name).hasHandlers():    
+        logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
+        logging.getLogger('PIL').setLevel(logging.WARNING)  # suppress buggy tk PIL output
         return logging.getLogger(name)
     outfile_path = join(log_dir, name+".log")
     try:
@@ -54,5 +57,7 @@ def configure_logger(name, log_dir=None, write_to_file=True):
             file_handler = logging.FileHandler(outfile_path, mode="a+")
             logger.addHandler(file_handler)
 
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib debug messages
+    logging.getLogger('PIL').setLevel(logging.WARNING)  # suppress buggy tk PIL output
     # install_mp_handler()
     return logger
