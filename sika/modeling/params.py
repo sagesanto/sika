@@ -78,6 +78,7 @@ class Parameter(ABC):
         prior_transform: PriorTransform,
         frozen: bool = False,
         values: Optional[Union[float,xr.DataArray]] = None,
+        guess: Optional[Union[float,xr.DataArray]] = None,
         varies_with: List[str] | None = None,
         coords: Dict[str, List[Any]] | None = None,
         dtype=float,
@@ -86,6 +87,7 @@ class Parameter(ABC):
         self.name = name
         self.prior_transform = prior_transform
         self._init_vals = None
+        self._init_guess = None
         self.frozen = frozen 
         self.coords = {}
         self.selectors = [{}]
@@ -101,6 +103,7 @@ class Parameter(ABC):
         if isinstance(values, xr.DataArray):
             self.dtype = values.dtype
         self._values = xr.DataArray(np.empty((1,),dtype=self.dtype))
+        self._guess = None
 
         if coords is not None:
             if not len(self.varies_with):
@@ -114,6 +117,13 @@ class Parameter(ABC):
             # we do this trickery with _init_vals because setting_coords re-inserts the initial values (so that later setting a coord doesnt erase everything)
             self._init_vals = values
             self.set_values(values)
+
+        if guess is not None:
+            if isinstance(guess, xr.DataArray) and guess.ndim > 0 and not self.coords:
+                coords = dict(guess.coords)
+                self.set_coords(coords)
+            self._init_guess = guess
+            self.set_guess(guess)
             
 
     def set_coords(self, coords: Dict[str, List[Any]]):
@@ -136,6 +146,8 @@ class Parameter(ABC):
         # if we already had initial values, put them back in now that we have coords
         if self._init_vals is not None:
             self.set_values(self._init_vals)
+        if self._init_guess is not None:
+            self.set_guess(self._init_guess)
         
     def __iter__(self):
         """ Iterates through tuples of (selector, corresponding value) for each of this `Parameter`'s selectors """
@@ -219,12 +231,75 @@ class Parameter(ABC):
             return r.item()
         except ValueError:
             return r
+
+    def set_guess(self, guess: Union[float, np.ndarray, xr.DataArray], context: Optional[Dict[str, Any]] = None):
+        """Set the parameter's starting guess using the same coordinate semantics as values."""
+
+        # Scalar case (no coords)
+        if self.shape == (1,):
+            self._guess = xr.DataArray(guess)
+            return
+
+        if self._guess is None:
+            self._guess = xr.DataArray(np.empty(self.shape, dtype=self.dtype), coords=self.coords, dims=self.dims)
+
+        # Slice assignment
+        if context is not None:
+            indexers = {dim: context[dim] for dim in context if dim in self.coords}
+            remaining_dims = [dim for dim in self.dims if dim not in indexers]
+
+            if isinstance(guess, xr.DataArray):
+                assert set(guess.dims) == set(remaining_dims), (
+                    f"Slice DataArray dims {guess.dims} must match remaining dims {remaining_dims}"
+                )
+                self._guess.loc[indexers] = guess
+                return
+
+            expected_shape = tuple(len(self.coords[dim]) for dim in remaining_dims)
+            guess_array = np.array(guess).reshape(expected_shape)
+            self._guess.loc[indexers] = guess_array
+            return
+
+        if isinstance(guess, xr.DataArray):
+            assert set(guess.dims) == set(self.dims), (
+                f"DataArray dimensions {guess.dims} do not match parameter dimensions {self.dims}."
+            )
+            self._guess = guess
+            return
+
+        reshaped = np.array(guess).reshape(self.shape)
+        self._guess = xr.DataArray(reshaped, coords=self.coords, dims=self.dims)
+
+    def guess(self, context: Optional[Dict[str, Any]] = None) -> Any:
+        """Return the parameter's starting guess for the given context, or None if unset."""
+        if self._guess is None:
+            return None
+        if not self.coords or context is None:
+            r = self._guess
+        else:
+            selector = {}
+            for k in self.coords:
+                if k in context:
+                    selector[k] = context[k]
+            r = self._guess.sel(**selector)
+        try:
+            return r.item()
+        except ValueError:
+            return r
         
     def as_xarray(self) -> xr.DataArray:
         return self._values
 
+    def guess_as_xarray(self) -> Optional[xr.DataArray]:
+        return self._guess
+
     def flattened(self) -> np.ndarray:
         return self._values.values.flatten()
+
+    def flattened_guess(self) -> Optional[np.ndarray]:
+        if self._guess is None:
+            return None
+        return self._guess.values.flatten()
     
     def set_from_flat(self, flat_array: np.ndarray):
         """
@@ -237,6 +312,15 @@ class Parameter(ABC):
         else:
             self.set_values(xr.DataArray(reshaped))
 
+    def set_guess_from_flat(self, flat_array: np.ndarray):
+        """Restore parameter guesses from a flat array, using current shape and coords."""
+        flat_array = np.asarray(flat_array)
+        reshaped = flat_array.reshape(self.shape)
+        if self.coords:
+            self.set_guess(xr.DataArray(reshaped, coords=self.coords, dims=list(self.coords.keys())))
+        else:
+            self.set_guess(xr.DataArray(reshaped))
+
     def __repr__(self) -> str:
         return f"{self.name}(prior_transform={self.prior_transform}, coords={self.coords}, values={self.flattened()}, frozen={self.frozen})"
 
@@ -245,6 +329,7 @@ class Parameter(ABC):
             "name": self.name,
             "prior_transform": self.prior_transform.to_dict(),
             "values": self._values,
+            "guess": self._guess,
             "frozen": self.frozen,
             "varies_with": self.varies_with,
             "coords": self.coords,

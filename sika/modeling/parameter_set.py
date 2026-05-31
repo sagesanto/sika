@@ -132,6 +132,17 @@ class ParameterSet:
             n = param.nvals
             param.set_from_flat(values[i:i+n])
             i += n
+
+    def flattened_guess(self) -> np.ndarray | None:
+        guesses = []
+        for param in self.unfrozen:
+            flattened = param.flattened_guess()
+            if flattened is None:
+                return None
+            guesses.append(flattened)
+        if not guesses:
+            return np.array([])
+        return np.concatenate(guesses)
     
     def get_unfrozen_transforms(self) -> List[PriorTransform]:
         """
