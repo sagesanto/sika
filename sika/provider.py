@@ -7,7 +7,9 @@ import numpy as np
 
 from .task import Task, IntermediateTask
 from .product import Product
-from .utils import NodeSpec, NodeShape
+from .utils import NodeSpec, NodeShape, requires_config
+
+
 
 T = TypeVar('T', bound=Union[Product, Collection[Product]], covariant=True)
 
@@ -20,6 +22,7 @@ class Provider(Generic[T], Task):
         """ A dictionary of keyword parameters and their possible values for which this :py:class:`~Provider` can provide a :py:class:`~sika.product.Product`"""
     
     @final
+    @requires_config
     def __call__(self, parameters:Dict[str, Any]) -> T:
         """Get a :py:class:`~sika.product.Product` of type ``T`` corresponding to the dictionary of keyword parameters provided. See each :py:class:`~Provider`'s :py:attr:`~Provider.provided_parameters` property to see what parameters are valid arguments.
         
@@ -30,7 +33,6 @@ class Provider(Generic[T], Task):
         :type parameters: Dict[str, Any]
         :return: a :py:class:`~sika.product.Product` of type ``T``
         """
-        assert self.config is not None, "Provider must have been configured with a config before calling. This could be done by passing config and logger arguments to the constructor of this task or any task downstream of it, or by calling either of their configure() methods"
         return self._call(parameters)
     
     def node_spec(self) -> NodeSpec:

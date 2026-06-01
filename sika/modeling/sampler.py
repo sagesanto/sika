@@ -29,7 +29,7 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)  # suppress matplotlib
 logging.getLogger('PIL').setLevel(logging.WARNING)  # suppress buggy tk PIL output
 
 from sika.config import Config
-from sika.utils import NodeSpec, NodeShape, save_bestfit_dict, savefig, plot_corner, get_mpi_info, get_process_info, get_pool
+from sika.utils import NodeSpec, NodeShape, save_bestfit_dict, savefig, plot_corner, get_mpi_info, get_process_info, get_pool, plot_chains_vs_priors
 from sika.product import Product
 from scipy.optimize import minimize
 
@@ -510,7 +510,6 @@ class Sampler(Generic[D,M], Task, ABC):
         # with open(p_with_uncert_outpath, "wb") as f:
         #     pickle.dump(self.param_w_uncert, f)
         # self.write_out(f"Wrote param with uncertainties to {p_with_uncert_outpath}")
-
     
     def visualize_results(self):
         """:meta private:"""      
@@ -523,13 +522,21 @@ class Sampler(Generic[D,M], Task, ABC):
         
         try:
             plt.close()
+            plot_chains_vs_priors(self.plot_chain,self.prior_transforms, self.param_names)
+            savefig("posteriors_vs_priors.png", self.config, outdir=self.outdir)
+            if show:
+                plt.show()
+        except Exception as e:
+            self.write_out(f'Posteriors vs. Priors plot failed: {e}',level=logging.WARN)
+        
+        try:
+            plt.close()
             plot_corner(self.plot_chain, self.param_names, fs=12, fs2=10)  # fs=fontsize
             savefig("corner_plot.png", self.config, outdir=self.outdir)
             if show:
                 plt.show()
         except Exception as e:
-            print('Corner / trace plot failed')
-            print(e)
+            self.write_out(f'Corner / trace plot failed: {e}',level=logging.WARN)
     
     def compute_log_like(self, samples_chain, log_prob):
         log_prior = np.empty_like(log_prob)
@@ -705,7 +712,7 @@ class Sampler(Generic[D,M], Task, ABC):
                 outputfiles_basename += "_"
         self.outputfiles_basename = outputfiles_basename
         
-        print(kwargs)
+        # print(kwargs)
         pymn.run(LogLikelihood=self._pymn_iterate, 
                     Prior=self._pymn_prior_transform, 
                     n_dims=self.nparams,
@@ -748,6 +755,8 @@ class Sampler(Generic[D,M], Task, ABC):
         if not np.isfinite(logprior):
             return -np.inf
         loglike = self.iterate(theta)
+        if not np.isfinite(loglike):
+            return -np.inf
         return logprior + loglike
     
     # def set_mcmc_starting_guess(self, guess:np.ndarray):
@@ -948,7 +957,7 @@ class Sampler(Generic[D,M], Task, ABC):
             if not all_valid:
                 msg += " and "
             if np.all(~enough_iters):
-                msg += f"no parameters have 100*tau < iterations (mean tau {np.mean(tau):.1f}, {iteration} iterations)"
+                msg += f"no parameters have 100*tau < iterations (mean tau {np.mean(tau):.1f}, max tau {np.max(tau):.1f}, {iteration} iterations)"
             else:
                 eff_not_enough = ~enough_iters & valid  # don't double-count invalid
                 not_conv_params = np.array(self.param_names)[eff_not_enough]
@@ -959,7 +968,7 @@ class Sampler(Generic[D,M], Task, ABC):
             if not (all_valid and all_enough_iters):
                 msg += " and "
             if np.all(~stable):
-                msg += "no parameters have a stable tau (fractional change < 1%) yet"
+                msg += f"no parameters have a stable tau (fractional change < 1%) yet: mean fractional delta tau = {np.mean(fractional_delta_tau) :.3f} and max = {np.max(fractional_delta_tau) :.3f}"
             else:
                 eff_unstable = ~stable & valid  # don't double-count invalid
                 not_conv_params = np.array(self.param_names)[eff_unstable]
@@ -969,17 +978,33 @@ class Sampler(Generic[D,M], Task, ABC):
                 
         return False, msg+'.'
     
-    def get_manual_starting_guess(self):
-        guess = self.flattened_guess
-        if guess is None:
+    def get_manual_starting_guess(self, max_attempts=10):
+        start_guess = self.flattened_guess
+        if start_guess is None:
             missing_guesses = [f"'{self.short_param_names[i]}'" for i in range(len(self.params)) if self.params[i].guess is None]
             if len(missing_guesses) == len(self.params):
                 raise ValueError("MCMC initialization method is 'manual' (indicating that manual starting guesses will be provided for each parameter) but no parameters have provided guesses! Provide them during initialization or manually set using each parameter's set_guess method.")
             missing_guess_str = ', '.join(missing_guesses)
             raise ValueError(f"MCMC initialization method is 'manual' (indicating that manual starting guesses will be provided for each parameter) but the following parameter(s) are missing starting guesses: {missing_guess_str}. Provide them during initialization or manually set using each parameter's set_guess method.")
+        
+        if not np.isfinite(self.log_posterior(start_guess)):
+            raise ValueError(f"Starting guess {dict(zip(self.param_names,start_guess))} yields an invalid posterior evaluation. Please choose another guess.")
         t_config = self.config[self.config['target']]
         nwalkers = t_config['emcee']['nwalkers']
-        guess = guess + 1e-4 * np.random.randn(nwalkers,self.nparams)
+        self.write_out(f"Starting guess: {dict(zip(self.param_names,start_guess))}")
+        guess = start_guess + 1e-4 * np.random.randn(nwalkers,self.nparams)
+        
+        for i,g in enumerate(guess):
+            scale = 1e-4
+            for j in range(max_attempts):
+                if np.isfinite(self.log_posterior(guess[i])):
+                    break
+                self.write_out(f'({j+1}) Regenerating jitter {i} of manually-provided guess')
+                guess[i] = start_guess + scale * np.random.randn(1,self.nparams)
+                scale /= 2
+            else:
+                raise RuntimeError(f"Could not find a valid jittered position around the starting guess after {max_attempts} attempts.")
+                
         return guess
     
     def _mcmc_param_timeseries(self, chain_full_shape, param_names):
@@ -997,11 +1022,22 @@ class Sampler(Generic[D,M], Task, ABC):
         return fig, axes
     
     def _make_tau_plot(self, taus, iters):
-        plt.plot(iters,taus,marker='o')
-        plt.plot(iters,iters/100,linestyle='--',color='k')
-        plt.xlabel('iterations')
-        plt.ylabel(r'$\tau$')
-        plt.title(r'MCMC Autocorrelation ($\tau$)')
+        fig, (ax1, ax2) = plt.subplots(2, 1, gridspec_kw={'height_ratios': [2, 1]}, sharex=True)
+
+        ax1.plot(iters, taus, marker='o')
+        ax1.plot(iters, iters / 100, linestyle='--', color='k')
+        ax1.set_ylabel(r'$\tau$')
+        ax1.set_title(r'MCMC Autocorrelation ($\tau$)')
+
+        if len(taus) > 1:
+            frac_change = np.abs(np.diff(taus)) / taus[1:]
+            ax2.plot(iters[1:], frac_change, marker='o', linewidth=1)
+
+        ax2.set_xlabel('iterations')
+        ax2.set_ylabel(r'$|\Delta\tau|/\tau$')
+
+        plt.tight_layout()
+        return fig
     
     def sample_emcee(self, pool, convergence_test=None):
         plt.switch_backend('agg')
@@ -1027,7 +1063,7 @@ class Sampler(Generic[D,M], Task, ABC):
         
         if method == EmceeGuessType.Manual:
             self.write_out('Using manually-provided MCMC starting points.')
-            self.mcmc_starting_guess = self.get_manual_starting_guess()
+            self.mcmc_starting_guess = self.get_manual_starting_guess(guess_cfg.get('max_attempts',10))
         # if method == EmceeGuessType.Optimize:
         #     self.write_out("Using optimized method to choose MCMC starting points")
         #     self.mcmc_starting_guess = self.generate_optimized_mcmc_guesses(n_candidates=guess_cfg.get('candidates',256), starting_jitter=guess_cfg.get('starting_jitter',0.01), max_attempts=guess_cfg.get('max_attempts',10))
@@ -1088,7 +1124,6 @@ class Sampler(Generic[D,M], Task, ABC):
                 
                 plt.close()
                 
-                self.write_out(autocorr[:index],np.arange(index)*check_convergence_every)
                 self._make_tau_plot(autocorr[:index], (np.arange(index)+1)*check_convergence_every)
                 plt.savefig(join(progress_plot_dir,f'autocorr_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
                 plt.close()

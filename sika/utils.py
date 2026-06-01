@@ -20,11 +20,19 @@ from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 
 from argparse import ArgumentParser
-
 import xarray as xr
-
+from functools import wraps
 
 from .config import Config, config_path
+
+def requires_config(f):
+    @wraps(f)
+    def wrapper(self, *args, **kwargs):
+        if self.config is None:
+            msg = "Provider must have been configured with a config before calling. This could be done by passing config and logger arguments to the constructor of this Task or any Task upstream of it, or by calling any of those Tasks' configure() methods"
+            raise RuntimeError(msg)
+        return f(self, *args, **kwargs)
+    return wrapper
 
 class NodeShape(enum.Enum):
     """Enum for node shapes in the pipeline visualization."""
@@ -162,6 +170,32 @@ def save_bestfit_dict(best_fit_dict, outfile):
 
     return best_fit_dict
 
+def plot_chains_vs_priors(chain_flat, prior_transforms, param_names):
+    from sika.modeling.priors import Uniform
+    priors = prior_transforms()
+    ncols = 3
+    nrows = int(np.ceil(len(priors)/ncols))
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols,figsize=(8*ncols,nrows*2.5))
+    axes = axes.flatten()
+    plt.tight_layout()
+    plt.subplots_adjust(hspace=0.5)
+    for i, ax in enumerate(axes):
+        if i >= len(priors):  # this should be a blank plot
+            ax.set_axis_off()
+            continue
+        samples = chain_flat[:,i]
+        p = priors[i]
+        ax.hist(samples,bins=50)
+        ax.set_title(param_names[i])
+        if isinstance(p, Uniform):
+            xlim = ax.get_xlim()
+        ax2 = ax.twinx()
+        p.plot(ax2,linestyle="dashed",label=f'Prior: ${p.dispname()}$')
+        ax2.legend(loc='upper right',frameon=False)
+        ax2.set_yticks([])
+        if isinstance(p,Uniform):
+            ax.set_xlim(xlim)
+    return fig, axes
 
 # adapted from jerry xuan
 def plot_corner(plot_chain, labels_all, baryrv=0, overplot_vals=[], unitless_titles=None,

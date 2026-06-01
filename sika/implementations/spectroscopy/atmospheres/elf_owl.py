@@ -1,4 +1,4 @@
-from os.path import join, abspath, expanduser
+from os.path import join, abspath, expanduser, exists
 import numpy as np
 import xarray
 from typing import Tuple
@@ -58,7 +58,10 @@ class ElfOwl(Provider[Tuple[PTModel,PMMRModel]]):
         model_dir = abspath(expanduser(self.config["elf_owl"]["model_dir"]))
 
         filename = f"spectra_logzz_{logkzz}_teff_{teff}_grav_{grav}_mh_{mh}_co_{co_eff}.nc"
-        ds = xarray.load_dataset(join(model_dir, filename))
+        fpath = join(model_dir,filename)
+        if not exists(fpath):  # i know its not pythonic, but im explicitly raising this here bc otherwise the callstack is a mess
+            raise FileNotFoundError(f"Can't find Elf Owl atmosphere file '{fpath}'")
+        ds = xarray.load_dataset(fpath)
 
         pressures = ds["pressure"].values
         # print("max and min pressures:", max(pressures), min(pressures))

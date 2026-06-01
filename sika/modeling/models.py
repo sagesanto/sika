@@ -10,7 +10,7 @@ from .params import Parameter
 from .parameter_set import ParameterSet
 from sika.product import Product
 from sika.task import Task
-from sika.utils import NodeSpec, NodeShape
+from sika.utils import NodeSpec, NodeShape, requires_config
 from .data import Dataset
 
 
@@ -107,6 +107,7 @@ class Model(Generic[T], Task, ABC):
         """ Silly recursion base-case """
         return [self.parameter_set]
     
+    @requires_config
     def __call__(self, parameters: List[float]) -> Dataset[T]:
         self.set_params(parameters)
         return self.make_model()
