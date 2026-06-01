@@ -268,7 +268,7 @@ class Sampler(Generic[D,M], Task, ABC):
         for adjustment, description in self.loss_adjustments:
             adj_value = adjustment(loss, parameters, modeled_ds, errors, residuals, self.data, self.config)
             loss += adj_value
-            self.write_out(f"Applied loss adjustment '{description}': {adj_value}, new loss: {loss}", level=logging.DEBUG)
+            # self.write_out(f"Applied loss adjustment '{description}': {adj_value}, new loss: {loss}", level=logging.DEBUG)
         if np.isnan(loss) or np.isinf(loss):
             self.write_out(f"WARNING: loss is {loss} for parameters {parameters}", level=logging.WARNING)
         return loss
@@ -1100,8 +1100,9 @@ class Sampler(Generic[D,M], Task, ABC):
             progress_plot_dir = join(self.outdir, 'mcmc_progress_plots')
             makedirs(progress_plot_dir, exist_ok=True)
             self.write_out(f'Progress plots will be written to {progress_plot_dir}')
-            
-            for sample in sampler.sample(self.mcmc_starting_guess,iterations=nsteps, progress=True):
+            tqdm_min_interval = cfg.get('tqdm_min_interval',0.1)
+            tqdm_max_interval = cfg.get('tqdm_max_interval',10)
+            for sample in sampler.sample(self.mcmc_starting_guess,iterations=nsteps, progress=True, progress_kwargs=dict(mininterval=tqdm_min_interval,maxinterval=tqdm_max_interval)):
                 if sampler.iteration % check_convergence_every:
                     continue
 
