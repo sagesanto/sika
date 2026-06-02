@@ -992,16 +992,20 @@ class Sampler(Generic[D,M], Task, ABC):
         t_config = self.config[self.config['target']]
         nwalkers = t_config['emcee']['nwalkers']
         self.write_out(f"Starting guess: {dict(zip(self.param_names,start_guess))}")
-        guess = start_guess + 1e-4 * np.random.randn(nwalkers,self.nparams)
+        
+        g_config = t_config['emcee'].get('initial_pos',{})
+        starting_jitter = g_config.get('starting_jitter',1e-4)
+        self.write_out(f"Will perturb manual guess with starting jitter {starting_jitter} to create {nwalkers} initial positions.")
+        guess = start_guess + starting_jitter * np.random.randn(nwalkers,self.nparams)
         
         for i,g in enumerate(guess):
-            scale = 1e-4
+            jitter = starting_jitter
             for j in range(max_attempts):
                 if np.isfinite(self.log_posterior(guess[i])):
                     break
                 self.write_out(f'({j+1}) Regenerating jitter {i} of manually-provided guess')
-                guess[i] = start_guess + scale * np.random.randn(1,self.nparams)
-                scale /= 2
+                guess[i] = start_guess + jitter * np.random.randn(1,self.nparams)
+                jitter /= 2
             else:
                 raise RuntimeError(f"Could not find a valid jittered position around the starting guess after {max_attempts} attempts.")
                 
@@ -1040,6 +1044,7 @@ class Sampler(Generic[D,M], Task, ABC):
         return fig
     
     def sample_emcee(self, pool, convergence_test=None):
+        from datetime import datetime, timedelta
         plt.switch_backend('agg')
         if convergence_test is None:
             convergence_test = self.has_mcmc_converged
@@ -1082,11 +1087,13 @@ class Sampler(Generic[D,M], Task, ABC):
 
             # largely borrowed from https://emcee.readthedocs.io/en/stable/tutorials/monitor/
             
-            if cfg.get("save_continuous",True):
+            if cfg.get("save_continuous",True) and not self.config['parallel']['mpi']:
                 self.write_out('Running MCMC with HDF backend (continuous saving).')
                 outfile = join(self.outdir, 'emcee_progress.h5')
                 backend = emcee.backends.HDFBackend(outfile)
             else:
+                if cfg.get("save_continuous",True) and self.config['parallel']['mpi']:
+                    self.write_out('Continuous saving to HD5 is not supported when running with MPI.')
                 self.write_out('Running MCMC with standard backend.')
                 backend = emcee.backends.Backend()
                 
@@ -1100,8 +1107,30 @@ class Sampler(Generic[D,M], Task, ABC):
             progress_plot_dir = join(self.outdir, 'mcmc_progress_plots')
             makedirs(progress_plot_dir, exist_ok=True)
             self.write_out(f'Progress plots will be written to {progress_plot_dir}')
+            
             tqdm_min_interval = cfg.get('tqdm_min_interval',0.1)
             tqdm_max_interval = cfg.get('tqdm_max_interval',10)
+            
+            def prettyprint_duration(duration:timedelta):
+                days = duration.days
+                hours, remainder = divmod(duration.seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+
+                duration_str = f"{days}d {hours}h {minutes}m {seconds}s"
+                return duration_str
+            
+            max_runtime_hours = cfg.get('max_runtime_hours')
+            start_time = datetime.now()
+            end_time = None
+            max_runtime = None
+            if max_runtime_hours is not None:
+                max_runtime = timedelta(hours=max_runtime_hours)
+                end_time = start_time + max_runtime
+                self.write_out(f'Maximum runtime is set to {prettyprint_duration(max_runtime)} from now (which will be on {end_time.strftime("%a %d %b %Y at %I:%M%p")})')
+            
+            interrupted = False
+            timed_out = False
+            
             for sample in sampler.sample(self.mcmc_starting_guess,iterations=nsteps, progress=True, progress_kwargs=dict(mininterval=tqdm_min_interval,maxinterval=tqdm_max_interval)):
                 if sampler.iteration % check_convergence_every:
                     continue
@@ -1114,11 +1143,6 @@ class Sampler(Generic[D,M], Task, ABC):
 
                 converged, msg = convergence_test(iteration, tau, old_tau)
                 self.write_out(msg)
-                if converged:
-                    self.write_out(f'Converged after {sampler.iteration} iterations')
-                    break
-                if sampler.iteration + check_convergence_every < nsteps:  # dont overwrite tau if we havent converged and we're at the end - in that case we need to keep the old val to determine convergence
-                    old_tau = tau
                     
                 fig, axes = self._mcmc_param_timeseries(sampler.get_chain(), self.param_names)
                 plt.savefig(join(progress_plot_dir,f'param_timeseries_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
@@ -1128,10 +1152,31 @@ class Sampler(Generic[D,M], Task, ABC):
                 self._make_tau_plot(autocorr[:index], (np.arange(index)+1)*check_convergence_every)
                 plt.savefig(join(progress_plot_dir,f'autocorr_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
                 plt.close()
+                
+                if converged:
+                    self.write_out(f'Converged after {sampler.iteration} iterations')
+                    break
+                    
+                if end_time is not None and datetime.now() >= end_time:
+                    self.write_out(f'Reached time limit of {prettyprint_duration(max_runtime)}. Concluding sampling', level=logging.WARN)
+                    timed_out = True
+                    break
+                
+                if exists(join(self.outdir, 'interrupt')):
+                    self.write_out('Detected interrupt file. Concluding sampling', level=logging.WARN)
+                    interrupted = True
+                    break
+                
+                if sampler.iteration + check_convergence_every < nsteps:  # dont overwrite tau if we havent converged and we're at the end - in that case we need to keep the old val to determine convergence
+                    old_tau = tau
             
             tau = sampler.get_autocorr_time(tol=0)
             iterations = sampler.iteration
-            self.write_out(f'Done sampling after {iterations} iterations (max allowed was {nsteps}).')
+            
+            elapsed = datetime.now() - start_time
+            elapsed_str = prettyprint_duration(elapsed)
+            
+            self.write_out(f'Done sampling after {elapsed_str}. Completed {iterations} iterations (max allowed was {nsteps}).')
             converged, msg = convergence_test(iterations, sampler.get_autocorr_time(tol=0), old_tau)
             self.write_out(f"Autocorrelation time: {tau}")
             
@@ -1140,6 +1185,14 @@ class Sampler(Generic[D,M], Task, ABC):
                 self.write_out(msg,level=logging.ERROR)
                 with open(join(self.outdir,'DID_NOT_CONVERGE.txt'),'w+') as f:
                     f.write(msg)
+            
+            if timed_out:
+                with open(join(self.outdir,f'TIMED_OUT_{iterations}_iters_at_{datetime.now().strftime("%Y%m%d_%H_%M")}.txt'),'w+') as f:
+                    f.write(f"Run timed out after {elapsed_str}. Completed {iterations} iterations.")
+                    
+            if interrupted:
+                with open(join(self.outdir,f'INTERRUPTED_{iterations}_iters_at_{datetime.now().strftime("%Y%m%d_%H_%M")}.txt'),'w+') as f:
+                    f.write(f"Run was interrupted by presence of 'interrupt' file after {elapsed_str}. Completed {iterations} iterations.")
                     
             with open(join(self.outdir,'autocorrelation_times.json'),'w+') as f:
                 json.dump(dict(zip(self.param_names,tau)),f)
