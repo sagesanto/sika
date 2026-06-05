@@ -27,6 +27,7 @@ dependencies = [
     'schwimmbad',
     'dynesty',
     'pymultinest',
+    'emcee',
     'corner',
     'networkx',
     'h5py'

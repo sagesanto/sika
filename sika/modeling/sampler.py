@@ -366,7 +366,7 @@ class Sampler(Generic[D,M], Task, ABC):
         if self.sampler_type == 'dynesty':
             self.res, self.plot_chain, self.logprob_chain, self.log_likes, self.log_priors, self.map_params, self.mle_params = self.sample_dynesty(pool)
         if self.sampler_type == "pymultinest":
-            self.res, self.plot_chain, self.logprob_chain, self.log_likes, self.log_priors, self.map_params, self.mle_params = self.sample_dynesty(pool)
+            self.res, self.plot_chain, self.logprob_chain, self.log_likes, self.log_priors, self.map_params, self.mle_params = self.sample_pymn()
         if self.sampler_type == "emcee":
             self.res, self.plot_chain, self.logprob_chain, self.log_likes, self.log_priors, self.map_params, self.mle_params = self.sample_emcee(pool, mcmc_convergence_test)
         self.max_params = self.map_params
