@@ -193,6 +193,31 @@ def test_flattened_guess_matches_parameter_order():
     ps = AuxiliaryParameterSet(p1=p1, p2=p2)
     ps.set_coords(coords)
     np.testing.assert_array_equal(ps.flattened_guess(), np.array([1, 2, 3, 4, 5]))
+    
+def test_guess_order_matches_values_order_flattened():
+    coords = {"night": ["n2", "n1"], "order": [1, 0]}
+    p1 = Parameter(
+        "p1",
+        prior_transform=Uniform(0, 1),
+        varies_with=["night", "order"],
+        coords=coords,
+        guess=np.array([[1, 2], [3, 4]]),
+        values=np.array([[1, 2], [3, 4]]),
+    )
+    np.testing.assert_array_equal(p1.flattened(), p1.flattened_guess())
+    
+def test_guess_order_matches_values_order_selected():
+    coords = {"night": ["n2", "n1"], "order": [1, 0]}
+    p1 = Parameter(
+        "p1",
+        prior_transform=Uniform(0, 1),
+        varies_with=["night", "order"],
+        coords=coords,
+        guess=np.array([[1, 2], [3, 4]]),
+        values=np.array([[1, 2], [3, 4]]),
+    )
+    for sel in p1.selectors:
+        assert p1.values(sel) == p1.guess(sel)
 
 def test_flattened_guess_is_none_if_any_missing_guess():
     coords = {"night": ["n1", "n2"]}

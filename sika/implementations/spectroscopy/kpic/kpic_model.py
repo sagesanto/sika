@@ -6,7 +6,7 @@ from kpicdrp.xcorr import convolve_and_sample
 
 from sika.modeling.data import Dataset
 from sika import ProviderMiddleware, Provider, Product
-from sika.modeling import Model, CompositeModel, EmptyParameterSet, Dataset, DataLoader
+from sika.modeling import Model, CompositeModel, EmptyParameterSet, Dataset, DataLoader, DataWrapper
 from sika.implementations.spectroscopy import Spectrum
 from .kpic_spectrum import KPICSpectrum, KPICOrder
 
@@ -24,32 +24,7 @@ def apply_kpic_response(model:Spectrum, kpic_spec: KPICOrder):
     model.flux *= np.array(kpic_spec.response_flux)
     return model
 
-D = TypeVar('D', bound=Product, covariant=True)
-class DataWrapper(Provider[Dataset[D]]):
-    """ Provides a unified interface for loading data from either one already-loaded Dataset or from a DataLoader"""
-    def __init__(self, *args, data_or_loader: Dataset[D] | DataLoader[D], **kwargs):
-        self.data = None
-        self.data_provider = None
-        if isinstance(data_or_loader, Dataset):
-            self.data = data_or_loader
-        else:
-            self.data_provider = data_or_loader
-        super().__init__(*args, prev=self.data_provider, **kwargs)
-    
-    def _call(self, parameters) -> Dataset[D]:
-        if self.data:
-            return self.data
-        elif self.data_provider:
-            return self.data_provider(parameters)
-        raise ValueError("No data available")
-    
-    @property
-    def provided_parameters(self):
-        if self.data_provider:
-            return self.data_provider.provided_parameters
-        return {}
-
-class KPICModel(CompositeModel[Spectrum]):
+class KPICModel(CompositeModel[KPICOrder]):
     def __init__(self, name:str, spectral_model: Model[Spectrum], kpic_data: Dataset[KPICOrder] | DataLoader[KPICOrder], *args, data_params={}, **kwargs):
         super().__init__(name, EmptyParameterSet(), *args, **kwargs)
         self.spectral_model = spectral_model
@@ -68,7 +43,7 @@ class KPICModel(CompositeModel[Spectrum]):
     def previous(self):
         return [self.spectral_model, self.data_wrapper]
     
-    def make_model(self) -> Dataset[Spectrum]:    
+    def make_model(self) -> Dataset[KPICOrder]:    
         model_set = self.spectral_model.make_model()
 
         kpic_models = []

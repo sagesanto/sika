@@ -92,7 +92,10 @@ class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
             
             d_wlen, d_flux, d_errors = np.array(data_spectrum.wlen,copy=True), np.array(data_spectrum.flux,copy=True), np.array(data_spectrum.errors,copy=True)
             assert len(d_wlen) == len(d_flux) == len(d_errors), f"Data wavelength ({len(d_wlen)}), flux ({len(d_flux)}), and error ({len(d_errors)}) arrays must be of the same length!"
+            
+            # maybe just normalize here (is that necessary?). everyone should have been continuum subtracted by now. actually, might still need to be aligned to data grid
             model_fluxes = [scale_model_to_order(d_wlen, np.array(s.wlen,copy=True), np.array(s.flux,copy=True), self.filter_type, self.filter_size, subtract_continuum = not s.metadata.get("continuum_subtracted")) for s in modeled_spectra]
+            
             bad_mask = np.logical_or.reduce([np.isnan(f) for f in model_fluxes])
             
             for (start_wlen, end_wlen) in self.masked_ranges:
@@ -110,8 +113,10 @@ class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
                 individual_model_wlens[m.name] = d_wlen
             
             if self.optimize_flux_scale:
+                # print('optimizing flux scale')
                 scale_factors, beta = optimize_scale_factors(d_flux, d_errors, model_fluxes)
             else:
+                # print('using fitted scale factors')
                 beta = 1  # not doing error inflation 
                 if self.error_inflation_terms is not None:
                     beta = self.error_inflation_terms.beta.values(selector)
@@ -121,8 +126,11 @@ class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
                 scale_factors = []
                 for p in scale_params.values():
                     scale_factors.append(p)
+                scale_factors = np.array(scale_factors)
                 assert len(scale_factors) == len(model_fluxes), f"Scale parameters are not the correct shape! We have {len(model_fluxes)} models but {len(scale_factors)} scale factors: {scale_params}"
-                
+            # print(f'{type(scale_factors)} = ')
+            # print(f'{scale_factors} = ')
+            
             combined_flux = sum(f * sf for f, sf in zip(model_fluxes, scale_factors))
             residuals = d_flux - combined_flux  # compute the residuals here instead of later just because its convenient. we'll store them in the metadata and pull them out later
             errors = d_errors * beta
@@ -135,10 +143,10 @@ class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
             # comb_residuals.append(residuals)
             
             # param_dict = {model.name: model.parameter_set.sel(selector) for model in self.models}
-            if np.any(scale_factors == 0):
+            if np.any(scale_factors <= 0):
                 # raise ConstraintViolation("Scale factors of zero!")
-                self.write_out("scale factors of zero!")
-                # self.write_out("scale factors of zero!", np.array(comb_scale_factors), "| data selector:", selector, "| parameters:", self.params)
+                # self.write_out("scale factors of zero!")
+                self.write_out("scale leq zero!", np.array(scale_factors), "| data selector:", selector, "| parameters:", self.params)
 
             model_info = {}
             for model, spec in zip(self.models, modeled_spectra):
@@ -151,7 +159,7 @@ class NComponentEchelleSampler(Sampler[Spectrum, Spectrum]):
                 }
             
             s = Spectrum(
-                parameters={ },
+                parameters=dict(zip(self.param_names,self.flattened_params)),
                 wlen=d_wlen,
                 flux=combined_flux,
                 errors = errors,

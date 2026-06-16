@@ -15,7 +15,7 @@ from enum import Enum
 import matplotlib.pyplot as plt
 
 from sika.task import Task
-from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, Constraint, ConstraintViolation, AuxiliaryParameterSet, PriorTransform, ParameterSet
+from sika.modeling import Model, Dataset, DataLoader, LnLikelihood, LnLikelihoodErrPenalty, Constraint, ConstraintViolation, AuxiliaryParameterSet, PriorTransform, ParameterSet
 
 
 # this is required or pickling of things like lambdas will not work
@@ -72,7 +72,7 @@ class Sampler(Generic[D,M], Task, ABC):
     
     supported_samplers = ['dynesty', "pymultinest", "emcee"]
 
-    def __init__(self, run_prefix:str, outdir, data: Union[Dataset[D], DataLoader[D]], models: List[Model[M]], *args, loss=LnLikelihood(), data_params: Optional[Dict] = None, restore_from: Optional[str]=None, constraints: Optional[List[Constraint]]=None, aux_params:Optional[AuxiliaryParameterSet]=None, **kwargs):
+    def __init__(self, run_prefix:str, outdir, data: Union[Dataset[D], DataLoader[D]], models: List[Model[M]], *args, loss=LnLikelihoodErrPenalty(), data_params: Optional[Dict] = None, restore_from: Optional[str]=None, constraints: Optional[List[Constraint]]=None, aux_params:Optional[AuxiliaryParameterSet]=None, **kwargs):
         """Initialize the Sampler.
 
         :param run_prefix: a name for the run, used to name output files
@@ -172,6 +172,17 @@ class Sampler(Generic[D,M], Task, ABC):
         if not guesses:
             return np.array([])
         return np.concatenate(guesses)
+    
+    @property
+    def flattened_params(self) -> np.ndarray:
+        vals = []
+        for pset in self.parameter_sets:
+            flattened = pset.flattened()
+            if len(flattened):
+                vals.append(flattened)
+        if not vals:
+            return np.array([])
+        return np.concatenate(vals)
         
     def node_spec(self) -> NodeSpec:
         return NodeSpec(
@@ -424,7 +435,7 @@ class Sampler(Generic[D,M], Task, ABC):
             self.write_out(f"Writing logprob chain .npy file failed: {e}", level=logging.ERROR)
             
         try:
-            raw_logprob_chain_outpath = join(self.outdir, "raw_plot_chain.txt")
+            raw_logprob_chain_outpath = join(self.outdir, "raw_log_prob_chain.txt")
             np.savetxt(fname=raw_logprob_chain_outpath, X=self._raw_log_prob_flat)
             self.write_out(f"Wrote raw logprob chain to {raw_logprob_chain_outpath}")
         except AttributeError:
@@ -909,6 +920,9 @@ class Sampler(Generic[D,M], Task, ABC):
             self.write_out(f'nwalkers: {nwalkers}')
             self.write_out(f'nparams: {self.nparams}')
             walkers = best_guess + np.random.normal(0.0, jitter_scale, size=(nwalkers, self.nparams))
+            # should check the logprior here first, then the posterior
+            # inside_prior = np.array([np.isfinite(self.log_prior(w)) for w in walkers])
+            # good = inside_prior
             good = np.array([np.isfinite(self.log_posterior(w)) for w in walkers])
             if good.all():
                 self.write_out("Accepted starting positions.")
@@ -1011,6 +1025,9 @@ class Sampler(Generic[D,M], Task, ABC):
                 
         return guess
     
+    def _mcmc_corner(self, chain_flat,param_names):
+        plot_corner(chain_flat, param_names, fs=12, fs2=10)  # fs=fontsize
+        
     def _mcmc_param_timeseries(self, chain_full_shape, param_names):
         nparams = len(param_names)
         fig, axes = plt.subplots(nparams, figsize=(10, 7/3 * nparams), sharex=True)
@@ -1130,6 +1147,7 @@ class Sampler(Generic[D,M], Task, ABC):
             
             interrupted = False
             timed_out = False
+            progress_plots = cfg.get('progress_plots',['tau','corner','timeseries'])
             
             for sample in sampler.sample(self.mcmc_starting_guess,iterations=nsteps, progress=True, progress_kwargs=dict(mininterval=tqdm_min_interval,maxinterval=tqdm_max_interval)):
                 if sampler.iteration % check_convergence_every:
@@ -1144,14 +1162,22 @@ class Sampler(Generic[D,M], Task, ABC):
                 converged, msg = convergence_test(iteration, tau, old_tau)
                 self.write_out(msg)
                     
-                fig, axes = self._mcmc_param_timeseries(sampler.get_chain(), self.param_names)
-                plt.savefig(join(progress_plot_dir,f'param_timeseries_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
+                if 'corner' in progress_plots:
+                    try:
+                        self._mcmc_corner(sampler.get_chain(flat=True), self.param_names)
+                        plt.savefig(join(progress_plot_dir,f'corner{index*check_convergence_every}.png'),bbox_inches="tight")
+                        plt.close()
+                    except Exception as e:
+                        self.write_out(f'Unable to make corner plot: {e}',level=logging.WARN)        
                 
-                plt.close()
+                if 'timeseries' in progress_plots:
+                    fig, axes = self._mcmc_param_timeseries(sampler.get_chain(), self.param_names)
+                    plt.savefig(join(progress_plot_dir,f'param_timeseries_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
                 
-                self._make_tau_plot(autocorr[:index], (np.arange(index)+1)*check_convergence_every)
-                plt.savefig(join(progress_plot_dir,f'autocorr_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
-                plt.close()
+                if 'tau' in progress_plots:
+                    self._make_tau_plot(autocorr[:index], (np.arange(index)+1)*check_convergence_every)
+                    plt.savefig(join(progress_plot_dir,f'autocorr_{index*check_convergence_every}.png'),bbox_inches="tight",dpi=300)
+                    plt.close()
                 
                 if converged:
                     self.write_out(f'Converged after {sampler.iteration} iterations')

@@ -5,6 +5,6 @@ from .constraint import BaseConstraint, Constraint, ListConstraint, ConstraintVi
 from .params import Parameter, RelativeParameter, DeltaParameter, UnitRelativeParameter, joint_iter
 from .parameter_set import ParameterSet, EmptyParameterSet, AuxiliaryParameterSet
 from .models import Model, CompositeModel
-from .data import Dataset, DataLoader #, ProviderDataLoader
+from .data import Dataset, DataLoader, DataWrapper #, ProviderDataLoader
 from .loss import Loss, LnLikelihood, LnLikelihoodErrPenalty
 from .sampler import Sampler

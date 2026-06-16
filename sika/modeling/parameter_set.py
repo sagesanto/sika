@@ -75,6 +75,8 @@ class ParameterSet:
         """
         Return the names of the dimensions of the parameter set, which are the keys of the coords dictionary.
         """
+        if self.coords is None:
+            return []
         return list(self.coords.keys())
     
     @property
@@ -132,6 +134,12 @@ class ParameterSet:
             n = param.nvals
             param.set_from_flat(values[i:i+n])
             i += n
+            
+    def flattened(self) -> np.ndarray:
+        vals = []
+        for param in self.unfrozen:
+            vals.append(param.flattened())
+        return np.concatenate(vals) if vals else np.array([])
 
     def flattened_guess(self) -> np.ndarray | None:
         guesses = []

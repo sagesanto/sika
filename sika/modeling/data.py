@@ -1,4 +1,4 @@
-__all__ = ["Dataset", "DataLoader"] #, "ProviderDataLoader"]
+__all__ = ["Dataset", "DataLoader", "DataWrapper"] #, "ProviderDataLoader"]
 
 from abc import ABC, abstractmethod
 from typing import Any, Callable, List, Union, Dict, TypeVar, Generic, Tuple, Collection, Optional
@@ -217,6 +217,17 @@ class Dataset(Generic[T], ABC):
                     selector[k] = context[k]
             try:
                 r = self._data.sel(**selector)
+            except KeyError:
+                invalid_vals = []
+                corresponding_keys = []
+                msgs = []
+                for k, v in selector.items():
+                    if v not in self.coords[k]:
+                        msgs.append(f"'{v}' is not valid for dimension '{k}'")
+                        # invalid_vals.append(v)
+                        # corresponding_keys.append(k)
+                msg = "; ".join(msgs)
+                raise KeyError(f"Selector {selector} is not valid for this Dataset, which has coords {self.coords}: {msg}.")
             except Exception as e:
                 print(f"selector: {selector}")
                 print(f"data coords: {self.coords}")
@@ -271,6 +282,30 @@ class DataLoader(Generic[T], Provider[Dataset[T]], ABC):
         return super().__call__(parameters)
 
 
+D = TypeVar('D', bound=Product, covariant=True)
+class DataWrapper(Provider[Dataset[D]]):
+    """ Provides a unified interface for loading data from either one already-loaded Dataset or from a DataLoader"""
+    def __init__(self, *args, data_or_loader: Dataset[D] | DataLoader[D], **kwargs):
+        self.data = None
+        self.data_provider = None
+        if isinstance(data_or_loader, Dataset):
+            self.data = data_or_loader
+        else:
+            self.data_provider = data_or_loader
+        super().__init__(*args, prev=self.data_provider, **kwargs)
+    
+    def _call(self, parameters) -> Dataset[D]:
+        if self.data:
+            return self.data
+        elif self.data_provider:
+            return self.data_provider(parameters)
+        raise ValueError("No data available")
+    
+    @property
+    def provided_parameters(self):
+        if self.data_provider:
+            return self.data_provider.provided_parameters
+        return {}
 # class ProviderDataLoader(Generic[T], DataLoader[T], ABC):
 #     """An interface that allows a modeling pipeline to fill the role of a DataLoader"""
     

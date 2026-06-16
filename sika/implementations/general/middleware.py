@@ -1,13 +1,13 @@
 from sika.provider import ProviderMiddleware
 from sika.product import Product
 
-from typing import Any, Dict, Generic, TypeVar, List
+from typing import Any, Dict, Generic, TypeVar, List, Collection, Mapping
 
 T = TypeVar('T', bound=Product, covariant=True)
 
 class ParamRestrictor(Generic[T], ProviderMiddleware[T]):
     """ Simple middeware that restricts the parameter space of previous tasks"""
-    def __init__(self, allowed_parameters: Dict[str,List[Any]], *args, **kwargs):
+    def __init__(self, allowed_parameters: Mapping[str,Collection[Any]], *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.allowed_parameters = allowed_parameters
         

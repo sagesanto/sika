@@ -1,3 +1,7 @@
 from .crires_spectrum import CRIRESSpectrum
 from .crires_loader import load_crires_spectrum, CRIRESDataLoader
+from .crires_echelle_spectrum import CRIRESOrder, CRIRESEchelleSpectrum
+from .crires_echelle_loader import load_crires_echelle_spectrum, CRIRESEchelleDataLoader
+from .crires_model import CRIRESModel
 from .empirical_crires_model import EmpiricalCRIRESModel
+from .empirical_crires_echelle_model import EmpiricalCRIRESEchelleModel

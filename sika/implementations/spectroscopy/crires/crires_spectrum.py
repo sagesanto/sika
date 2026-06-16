@@ -2,14 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from matplotlib.axes import Axes
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Sequence
 
-from sika.implementations.spectroscopy.spectra.spectrum import Spectrum
+from sika.implementations.spectroscopy.spectra.spectrum import Spectrum, EchelleOrder, EchelleSpectrum
 from sika.implementations.spectroscopy.utils import clean_and_continuum_subtract
 
-
-
 __all__ = ["CRIRESSpectrum"]
+
 
 @dataclass(kw_only=True)
 class CRIRESSpectrum(Spectrum):
@@ -34,12 +33,23 @@ class CRIRESSpectrum(Spectrum):
         for (start_wlen, end_wlen) in self.masked_ranges:
             del_mask[(self.wlen >= start_wlen) & (self.wlen <= end_wlen)] = 1
         del_mask = del_mask.astype(bool)
+        
+        print("wlen shape:",self.wlen.shape)
+        print('del_mask shape:',del_mask.shape)
 
         for indices in self.order_indices:
             wlen_order = self.wlen[indices]
             flux_order = self.flux[indices]
             error_order = self.errors[indices] if self.errors is not None else np.zeros_like(flux_order)
             mask = del_mask[indices]
+            
+            print()
+            # print("order",i)
+            print('order indices:',indices)
+            print('order indices shape:',indices.shape)
+            print('order del_mask shape:',mask.shape)
+            print('order wlen shape:',wlen_order.shape)
+            print()
 
             wlen_order = np.delete(wlen_order, mask)
             flux_order = np.delete(flux_order, mask)
@@ -73,6 +83,7 @@ class CRIRESSpectrum(Spectrum):
             for i in range(Nchip):
                 indices.append(np.arange(ind_edge[i], ind_edge[i+1]))
         else:
+            print(f'else case: {np.arange(len(wlen))}')
             indices.append(np.arange(len(self.wlen)))
 
         return indices
@@ -89,7 +100,7 @@ class CRIRESSpectrum(Spectrum):
     def errors_flat(self) -> np.ndarray:
         return np.concatenate(self.errors)
     
-    def plot(self, ax:Optional[List[Axes]]=None, **kwargs):
+    def plot(self, ax:Optional[Sequence[Axes] | np.ndarray]=None, **kwargs):
         """
         Plot the spectrum on the given axes.
         """

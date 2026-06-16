@@ -11,6 +11,7 @@ from .spectra.middleware import PassbandRestrictor, PercentileScaler, KBandCoupl
 from .single_component import SingleComponentModel
 from .n_component_sampler import NComponentSampler, scale_model_to_order
 from .echelle_sampler import NComponentEchelleSampler
+# from .echelle_sampler import NComponentEchelleSampler
 from .flux import Flux, FluxIntegrator, FluxGridInterpolator
 
 from .crires.crires_spectrum import CRIRESSpectrum

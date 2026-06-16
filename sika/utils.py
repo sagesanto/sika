@@ -6,7 +6,7 @@ import psutil
 from os import makedirs
 from os.path import join, exists, abspath, expanduser
 import logging
-from typing import List, Optional
+from typing import List, Optional, Collection, Any
 from datetime import datetime
 from pytz import UTC as dtUTC
 import numpy as np
@@ -592,3 +592,35 @@ def reduced_chi_sq(data_vals, model_vals, errors, n_free_params):
     chi2 = chi_sq(data_vals,model_vals,errors)
     dof = len(data_vals) - n_free_params
     return chi2 / dof
+
+
+def selector_order_to_param_guess(
+    selected_values:Collection[Any],
+    selector_dims:Collection[str],
+    param,
+):
+    """Reshape a list of values acquired by iterating through a dataset's selectors into the order required to set a parameter's guess with those values
+    
+    Ex: ::
+    
+        ds
+        >>> Dataset(Scalar,coords={'night': ['2024-10-01', '2024-10-04'], 'order': [0, 1, 2, 3, 4, 5]},dims=['night', 'order'])
+        selected_vals = [ds.values(sel).x for sel in ds.selectors]
+        selected_vals
+        >>> [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        param = Parameter(
+            "dummy",
+            Uniform(0, 1),
+            coords=ds.coords,
+            varies_with=['order', 'night'],
+        )
+        vals_guess_order = selector_order_to_param_guess(selected_vals,ds.dims,param)
+        param.set_guess_from_flat(vals_guess_order)
+        [param.guess(sel) for param in ds.selectors]
+        >>> [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    """
+    selector_shape = [len(param.coords[d]) for d in selector_dims]
+    arr = np.array(selected_values).reshape(selector_shape)
+
+    transpose_axes = [selector_dims.index(d) for d in param.dims]
+    return arr.transpose(transpose_axes).flatten()

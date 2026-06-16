@@ -14,6 +14,7 @@ from .spectra.spectrum import Spectrum
 from sika.modeling import CompositeModel, Dataset, Parameter, ParameterSet
 from sika.utils import (
     parse_path,
+    joint_iter
 )
 
 __all__ = ["Gl229BParameterSet", "BinaryParameterSet", "CompositeKBinary", "SimpleBinary"]
@@ -74,31 +75,17 @@ class SimpleBinary(CompositeModel[Spectrum]):
         """
         spec_a_set = self.companion_a.make_model()
         spec_b_set = self.companion_b.make_model()
-
-        (joint_params, _, _) = xr.broadcast(
-            self.parameter_set.as_xarray(),
-            self.companion_a.parameter_set.as_xarray(),
-            self.companion_b.parameter_set.as_xarray(),
-        )
-
-        all_coords = {c: np.array(v) for c, v in joint_params.coords.variables.items()}
-        _coord_vals = list(all_coords.values())
-        value_combinations = list(itertools.product(*_coord_vals))
-        joint_dims = list(all_coords.keys())
-
         spectra = []
-        for p in value_combinations:
-            sel = dict(zip(joint_dims, p))
-            spec_a = spec_a_set.values(sel)
-            spec_b = spec_b_set.values(sel)
+        joint_dims = None
 
-            metadata = sel  # VERY IMPORTANT
+        for sel, (spec_a, spec_b) in Dataset.joint_iter(spec_a_set, spec_b_set):
+            if joint_dims is None:
+                joint_dims = list(sel.keys())
+            metadata = dict(sel)  # VERY IMPORTANT
             
             metadata["individual_model_fluxes"] = {
-                m.name: spec.flux
-                for m, spec in zip(
-                    (self.companion_a, self.companion_b), (spec_a, spec_b)
-                )
+                self.companion_a.name: spec_a.flux,
+                self.companion_b.name: spec_b.flux,
             }
                         
             model_info = {}
@@ -121,7 +108,7 @@ class SimpleBinary(CompositeModel[Spectrum]):
                 )
             )
 
-        ds = Dataset(spectra, dims=joint_dims)
+        ds = Dataset(spectra, dims=joint_dims or [])
         return ds
 
 
@@ -156,26 +143,15 @@ class CompositeKBinary(CompositeModel[Spectrum]):
         """
 
         k_band_ratio = self.parameter_set.k_band_ratio.values()
-
         spec_a_set = self.companion_a.make_model()
         spec_b_set = self.companion_b.make_model()
-
-        (joint_params, _, _) = xr.broadcast(
-            self.parameter_set.as_xarray(),
-            self.companion_a.parameter_set.as_xarray(),
-            self.companion_b.parameter_set.as_xarray(),
-        )
-
-        all_coords = {c: np.array(v) for c, v in joint_params.coords.variables.items()}
-        _coord_vals = list(all_coords.values())
-        value_combinations = list(itertools.product(*_coord_vals))
-        joint_dims = list(all_coords.keys())
-
         spectra = []
-        for p in value_combinations:
-            sel = dict(zip(joint_dims, p))
-            spec_a = spec_a_set.values(sel)
-            spec_b = spec_b_set.values(sel)
+        joint_dims = None
+
+        for sel, (spec_a, spec_b) in Dataset.joint_iter(spec_a_set, spec_b_set):
+            if joint_dims is None:
+                joint_dims = list(sel.keys())
+                    
             k_band_ratio = self.parameter_set.k_band_ratio.values(sel)
             assert (
                 "k_band_flux" in spec_a.metadata
@@ -222,7 +198,7 @@ class CompositeKBinary(CompositeModel[Spectrum]):
                 )
             )
 
-        ds = Dataset(spectra, dims=joint_dims)
+        ds = Dataset(spectra, dims=joint_dims or [])
         return ds
 
 

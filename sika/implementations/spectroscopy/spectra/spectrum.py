@@ -3,10 +3,11 @@ import numpy as np
 import pandas as pd
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Tuple, Optional, Sequence
+from matplotlib.axes import Axes
+import matplotlib.pyplot as plt 
 from sika.config import Config
 from sika.product import DFProduct
-from typing import List
 
 __all__ = ["Spectrum"]
 
@@ -76,9 +77,9 @@ class Spectrum(DFProduct):
     def errors_flat(self) -> np.ndarray:
         return self.errors
 
-    def plot(self, ax=None, shade_errors=True, **kwargs):
+    def plot(self, ax:Optional[Axes]=None, shade_errors=True, **kwargs) -> Axes:
         """
-        Plot the spectrum on the given axes.
+        Plot the spectrum on the given Axes if provided, or new Axes if not. returns the Axes.
         """
         import matplotlib.pyplot as plt
         if ax is None:
@@ -114,6 +115,7 @@ class Spectrum(DFProduct):
             direction="in",
             labelsize=16,
         )
+        return ax
 
 
 @dataclass(kw_only=True)
@@ -129,11 +131,13 @@ class EchelleOrder(Spectrum):
         self.metadata['order'] = self.order
         
 
+# there's some reason that this doesn't inherit from Product but i dont remember why
 class EchelleSpectrum:
-    def __init__(self, order_indices: Optional[List[int]]=None, spectra: Optional[List[EchelleOrder]]=None, metadata:Optional[dict] = None) -> None:
+    def __init__(self, order_indices: Optional[List[int]]=None, spectra: Optional[List[EchelleOrder]]=None, metadata:Optional[dict] = None, parameters:Optional[dict] = None) -> None:
         self.order_indices: List[int] = order_indices if order_indices is not None else []
         self.spectra: List[EchelleOrder] = spectra if spectra is not None else []
         self.metadata = metadata or {}
+        self.parameters = parameters or {}
     
     def add_order(self, order_idx: int, spectrum: EchelleOrder):
         # print(f"[ORDER {order_idx}] Adding spec: {spectrum}")
@@ -141,11 +145,30 @@ class EchelleSpectrum:
         self.spectra.append(spectrum)
     
     @property
-    def norders(self):
+    def n_orders(self):
         return len(self.order_indices)
     
     @property
     def orders(self):
         return dict(zip(self.order_indices,self.spectra))
     
-    
+    def plot(self, axes:Optional[Sequence[Axes] | np.ndarray]=None, **kwargs):
+        """
+        Plot the spectrum by plotting each order on its own axis. If an array of axes is provided, will plot onto those. Returns an array of axes.
+        """
+        
+        if axes is None:
+            fig, axes = plt.subplots(nrows=self.n_orders, figsize=(12, 4*self.n_orders))
+        else:
+            assert len(axes) >= self.n_orders, f"If axes are provided, must provide at least as many axes as this spectrum has orders (n_orders = {self.n_orders})"
+        merged_kwargs = {
+            "alpha":0.5
+        }
+        
+        merged_kwargs.update(kwargs)
+
+        for i, order in self.orders.items():
+            order.plot(axes[i],**merged_kwargs)
+            axes[i].set_title(f'Order {order.order}')
+        
+        return axes
