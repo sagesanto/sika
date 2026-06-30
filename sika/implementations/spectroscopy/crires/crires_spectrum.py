@@ -34,8 +34,8 @@ class CRIRESSpectrum(Spectrum):
             del_mask[(self.wlen >= start_wlen) & (self.wlen <= end_wlen)] = 1
         del_mask = del_mask.astype(bool)
         
-        print("wlen shape:",self.wlen.shape)
-        print('del_mask shape:',del_mask.shape)
+        # print("wlen shape:",self.wlen.shape)
+        # print('del_mask shape:',del_mask.shape)
 
         for indices in self.order_indices:
             wlen_order = self.wlen[indices]
@@ -43,13 +43,13 @@ class CRIRESSpectrum(Spectrum):
             error_order = self.errors[indices] if self.errors is not None else np.zeros_like(flux_order)
             mask = del_mask[indices]
             
-            print()
+            # print()
             # print("order",i)
-            print('order indices:',indices)
-            print('order indices shape:',indices.shape)
-            print('order del_mask shape:',mask.shape)
-            print('order wlen shape:',wlen_order.shape)
-            print()
+            # print('order indices:',indices)
+            # print('order indices shape:',indices.shape)
+            # print('order del_mask shape:',mask.shape)
+            # print('order wlen shape:',wlen_order.shape)
+            # print()
 
             wlen_order = np.delete(wlen_order, mask)
             flux_order = np.delete(flux_order, mask)
@@ -83,7 +83,7 @@ class CRIRESSpectrum(Spectrum):
             for i in range(Nchip):
                 indices.append(np.arange(ind_edge[i], ind_edge[i+1]))
         else:
-            print(f'else case: {np.arange(len(wlen))}')
+            # print(f'else case: {np.arange(len(self.wlen))}')
             indices.append(np.arange(len(self.wlen)))
 
         return indices

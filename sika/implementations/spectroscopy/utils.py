@@ -295,20 +295,20 @@ def optimize_scale_factors(data_flux, data_error, model_fluxes: List[np.ndarray]
     # beta = np.sqrt(chi_squared/len(comp.norm_flux[d][c]))
     return scale_factors, beta
 
-# adapted from jerry xuan
-# filt_type -> filter_type: can be 'median' or 'gaussian'
-# medfilt -> filter_size: size of the median filter to apply
-def clean_and_continuum_subtract(fluxes, wavelengths, errors, bp_sigma=3, filter_type='median', filter_size=100):
+def clean(fluxes, wavelengths, errors, bp_sigma=3):
     clipped_indices = stats.sigma_clip(fluxes, sigma=bp_sigma)
     spike_inds = np.where(clipped_indices.mask==True)
-    # print(f"deleting {sum(len(i) for i in spike_inds)} spike points")
-    # plt.scatter(wavelengths[spike_inds], fluxes[spike_inds], s=1, color='red', label='bad pixels')
-    # plt.show()
-    # delete the nans and bad pixels
     wavelengths = np.delete(wavelengths, spike_inds)
     fluxes = np.delete(fluxes, spike_inds)
     errors = np.delete(errors, spike_inds)
     
+    return fluxes, wavelengths, errors
+
+# adapted from jerry xuan
+# filt_type -> filter_type: can be 'median' or 'gaussian'
+# medfilt -> filter_size: size of the median filter to apply
+def clean_and_continuum_subtract(fluxes, wavelengths, errors, bp_sigma=3, filter_type='median', filter_size=100):
+    fluxes, wavelengths, errors = clean(fluxes, wavelengths, errors, bp_sigma)
     f, norm_constant = continuum_subtract(fluxes, filter_size, filter_type)
     
     return f, wavelengths, errors, norm_constant

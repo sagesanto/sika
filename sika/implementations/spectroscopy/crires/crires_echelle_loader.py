@@ -13,7 +13,7 @@ import pandas as pd
 
 __all__ = ["load_crires_echelle_spectrum", "CRIRESEchelleDataLoader"]
 
-def load_crires_echelle_spectrum(data_file: str, wavelength_file: str, wavelen_range: Tuple[float,float] | None, filter_size:int, filter_type:str, bp_sigma:float, masked_ranges:Optional[List[Tuple[float,float]]]=None, metadata=None) -> CRIRESEchelleSpectrum:
+def load_crires_echelle_spectrum(data_file: str, wavelength_file: str, wavelen_range: Tuple[float,float] | None, sigma_clip, remove_continuum, filter_size:int, filter_type:str, bp_sigma:float, masked_ranges:Optional[List[Tuple[float,float]]]=None, metadata=None) -> CRIRESEchelleSpectrum:
     """Load a CRIRES spectrum from file. Loaded spectra will be continuum subtracted and normalized.
 
     :param data_file: Path to science data
@@ -22,6 +22,10 @@ def load_crires_echelle_spectrum(data_file: str, wavelength_file: str, wavelen_r
     :type wavelength_file: str
     :param wavelen_range: If None, no crop performed. If tuple (start, stop), will crop to only include this wavelength range.
     :type wavelen_range: tuple
+    :param sigma_clip: whether to clean the continuum with a sigma clip of sigma=bp_sigma
+    :type sigma_clip: bool
+    :param remove_continuum: whether to remove the continuum using the specified filter
+    :type remove_continuum: bool
     :param filter_size: Size of the filter to apply
     :type filter_size: int
     :param filter_type: Type of the filter to apply - 'median' or 'gaussian'
@@ -47,7 +51,7 @@ def load_crires_echelle_spectrum(data_file: str, wavelength_file: str, wavelen_r
     flux = np.array(df['flux'])
     errors = np.array(df['err'])
     if wavelen_range is not None:
-        clip_indices = np.where((wlen >= wavelen_range[0]) & (wlen <= wavelen_range[1]))
+        clip_indices = np.where((wlen >= wavelen_range[0]) & (wlen <= wavelen_range[1]) & ~np.isnan(flux))
         wlen = wlen[clip_indices]
         flux = flux[clip_indices]
         errors = errors[clip_indices]
@@ -57,11 +61,13 @@ def load_crires_echelle_spectrum(data_file: str, wavelength_file: str, wavelen_r
         wlen=wlen,
         flux=flux,
         errors=errors,
+        sigma_clip=sigma_clip,
+        remove_continuum=remove_continuum,
         filter_type=filter_type,
         filter_size=filter_size,
         bp_sigma=bp_sigma,
         masked_ranges=masked_ranges,
-        metadata=metadata
+        metadata=metadata,
     )
 
 
@@ -86,6 +92,9 @@ class CRIRESEchelleDataLoader(DataLoader[CRIRESOrder]):
         merged_cfg = dict(data_cfg).copy()
         merged_cfg.update(parameters)
         
+        remove_continuum = merged_cfg.get('remove_continuum',True)
+        sigma_clip = merged_cfg.get('sigma_clip',True)
+        
         wavelen_range = merged_cfg["wavelen_range"]
         filter_size = merged_cfg["filter_size"]
         filter_type = merged_cfg["filter_type"]
@@ -109,7 +118,7 @@ class CRIRESEchelleDataLoader(DataLoader[CRIRESOrder]):
             self.write_out(f"Loading data for target {target_name} from night {n} in directory {datadir} over wavelength range {wavelen_range}")
             metadata = dict(target=target_name,display_name=disp_name,night=n,directory=datadir, datafile=data_filename,wavelength_filename=wavelength_filename)
             s = load_crires_echelle_spectrum(
-                data_file, wavelength_file, wavelen_range, filter_size, filter_type, bp_sigma, masked_ranges, metadata=metadata
+                data_file, wavelength_file, wavelen_range, sigma_clip, remove_continuum, filter_size, filter_type, bp_sigma, masked_ranges, metadata=metadata
             )
             spectra.extend(s.spectra)  # grab the orders, discard the rest
         
